@@ -1109,19 +1109,20 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "关机睡眠");
         section(fb, 248, "选择电源菜单中“关机”的方式");
-        const char *labels[] = {"彻底关机", "先浅睡，10 分钟后深睡"};
+        const char *labels[] = {"彻底关机", "先浅睡，10 分钟后深睡", "仅浅睡"};
         const char *details[] = {"完全断电，长按电源键开机",
-                                 "锁屏画面保留；深睡后短按电源键开机"};
-        for (int i = 0; i < 2; ++i) {
+                                 "锁屏画面保留；深睡后短按电源键开机",
+                                 "锁屏画面保留；不断电，按键返回关机前页面"};
+        for (int i = 0; i < 3; ++i) {
             EpdRect box = {36, 300 + i * 154, 612, 132};
-            bool active = app_settings_staged_shutdown() == (i == 1);
+            bool active = app_settings_shutdown_style() == i;
             settings_card(fb, box, 22, active ? 0xd0 : UI_GRAY_WHITE, 0x70);
             ui_text(fb, 64, box.y + 23, 29, labels[i], EPD_DRAW_ALIGN_LEFT, false);
             ui_text(fb, 64, box.y + 79, 20, details[i], EPD_DRAW_ALIGN_LEFT, false);
             if (active) epd_fill_circle(609, box.y + 66, 8, UI_GRAY_BLACK, fb);
         }
-        ui_text(fb, 54, 664, 21, "浅睡时按键直接返回，深睡时会重新开机。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 708, 21, "锁屏样式同时适用于壁纸与阅读票根。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 784, 21, "浅睡时按键直接返回，深睡时会重新开机。", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 828, 21, "锁屏样式同时适用于壁纸与阅读票根。", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1338,7 +1339,8 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","关机睡眠"};
     const char *display_values[]={font_name,contrast,
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
-        app_settings_home_full_refresh()?"开启":"关闭",idle,app_settings_staged_shutdown()?"先浅后深":"彻底断电"};
+        app_settings_home_full_refresh()?"开启":"关闭",idle,
+        app_settings_shutdown_style()==APP_SHUTDOWN_STAGED?"先浅后深":app_settings_shutdown_style()==APP_SHUTDOWN_LIGHT?"仅浅睡":"彻底断电"};
     const int display_icons[]={2,7,15,11,14,9};
     setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
@@ -1951,11 +1953,15 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_POWER_SLEEP) {
         if (y >= 300 && y < 432) {
-            app_settings_set_staged_shutdown(false);
+            app_settings_set_shutdown_style(APP_SHUTDOWN_FULL);
             return APP_REDRAW_PAGE;
         }
         if (y >= 454 && y < 586) {
-            app_settings_set_staged_shutdown(true);
+            app_settings_set_shutdown_style(APP_SHUTDOWN_STAGED);
+            return APP_REDRAW_PAGE;
+        }
+        if (y >= 608 && y < 740) {
+            app_settings_set_shutdown_style(APP_SHUTDOWN_LIGHT);
             return APP_REDRAW_PAGE;
         }
         return APP_REDRAW_NONE;

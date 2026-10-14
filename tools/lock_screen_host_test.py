@@ -110,21 +110,21 @@ int main(void){
  start();for(int i=0;i<4;++i)tap(342,1021);tap(144,1132);add(0,0,0,0);
  tap(342,1350);add(158,544,1,0);add(158,544,2,0);add(158,544,0,0);
  add(158,544,1,0);add(158,544,0,-1);add(0,0,0,0);correct();
- lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==2&&waits==2&&!ready&&!held&&wiped>2&&entries==2&&!settles);
+ lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==2&&waits==2&&!ready&&!held&&wiped>2&&entries==2&&!settles);
  // Cold boot authenticates immediately and marks startup ready while retaining resume.
- start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&!waits&&ready==1&&held==1&&entries==1&&!settles);
+ start();correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(verified==1&&!waits&&ready==1&&held==1&&entries==1&&!settles);
  // PMU short/long actions only return to the locked art, then demand authentication again.
- for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1);}
+ for(int action=2;action<=3;++action){start();add(0,0,0,-action);for(int i=0;i<10;++i)add(0,0,0,0);correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(verified==1&&waits==1);}
  // Low-memory/cache fallback and display errors still demand the correct credential.
- start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&fulls>0);low_memory=display_failure=false;
- start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;
+ start();low_memory=display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(verified==1&&fulls>0);low_memory=display_failure=false;
+ start();low_memory=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==1&&waits==1&&entries==1&&!settles);low_memory=false;
  // 单次密码入场失败重建同一画面；不能绕过验证。
  // A failed single entry rebuilds the protected PIN screen; verification remains mandatory.
- start();display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1&&entries==1&&!settles&&fulls>0);display_failure=false;
+ start();display_failure=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false,false);assert(verified==1&&entries==1&&!settles&&fulls>0);display_failure=false;
  // Cancel never releases the caller: deep sleep terminates the protected loop instead.
- start();tap(144,1132);timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(0);}assert(!verified&&waits==1);timeout_scenario=false;
+ start();tap(144,1132);timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(0);}assert(!verified&&waits==1);timeout_scenario=false;
  // Corrupt credentials remain locked even with a valid-looking sequence.
- start();correct();valid_storage=false;timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(0);}assert(!verified);valid_storage=true;timeout_scenario=false;
+ start();correct();valid_storage=false;timeout_scenario=true;if(!setjmp(deep)){lock_screen_authenticate(&hl,(void*)1,(void*)2,true,false);assert(0);}assert(!verified);valid_storage=true;timeout_scenario=false;
  uint8_t *f=malloc(FRAME_BYTES);assert(lock_screen_restore(f));
  // 旧拼贴缓存不能跨样式进入票根或壁纸。/ Collage art must not cross into ticket or wallpaper mode.
  for(unsigned saved=0;saved<3;++saved){

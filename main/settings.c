@@ -82,7 +82,7 @@
 #define MEDIA_DIR_MAX 96
 
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
-static bool s_staged_shutdown;
+static app_shutdown_style_t s_shutdown_style = APP_SHUTDOWN_FULL;
 static bool s_home_full_refresh;
 static app_main_refresh_mode_t s_main_refresh;
 static char s_device_name[64] = "kiikoread";
@@ -187,7 +187,7 @@ void app_settings_init(void) {
     }
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_SHUTDOWN_MODE, &raw) == ESP_OK)
-        s_staged_shutdown = raw == 1;
+        s_shutdown_style = raw <= APP_SHUTDOWN_LIGHT ? (app_shutdown_style_t)raw : APP_SHUTDOWN_FULL;
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -361,11 +361,13 @@ void app_settings_set_sleep_mode(app_sleep_mode_t mode) {
     nvs_close(h);
 }
 
-bool app_settings_staged_shutdown(void) { return s_staged_shutdown; }
-void app_settings_set_staged_shutdown(bool staged) {
-    if (staged == s_staged_shutdown) return;
-    s_staged_shutdown = staged;
-    nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, staged ? 1 : 0);
+app_shutdown_style_t app_settings_shutdown_style(void) { return s_shutdown_style; }
+void app_settings_set_shutdown_style(app_shutdown_style_t style) {
+    if (style > APP_SHUTDOWN_LIGHT) style = APP_SHUTDOWN_FULL;
+    if (style == s_shutdown_style) return;
+    s_shutdown_style = style;
+    // 旧固件把值 2（仅浅睡）读成 false（彻底关机），降级安全。/ Old firmware reads 2 (light-only) as false (full off): a safe downgrade.
+    nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, (uint8_t)style);
 }
 
 bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
@@ -947,7 +949,9 @@ esp_err_t app_settings_backup_save(void) {
     strlcpy(backup.fonts_dir, s_fonts_dir, sizeof(backup.fonts_dir));
     backup_seal(&backup);
     uint8_t idle_index = s_auto_lock_minutes == 1 ? 1 : s_auto_lock_minutes == 5 ? 2 : s_auto_lock_minutes == 10 ? 3 : 0;
-    uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_staged_shutdown ? 1 : 0) | (idle_index << 1) | ((uint8_t)s_main_refresh << 3)};
+    // 备份扩展字节 bit0 只有一档：仅浅睡降级为先浅后深，恢复时不丢"不断电"意图之外的信息。
+    // The backup extension has one bit here: light-only degrades to staged, nothing else is lost.
+    uint8_t extension[7] = {s_book_indent, s_book_rule_offset, (s_shutdown_style != APP_SHUTDOWN_FULL ? 1 : 0) | (idle_index << 1) | ((uint8_t)s_main_refresh << 3)};
     uint32_t extension_hash = backup_shutdown_checksum(&backup, s_book_indent,
                                                         s_book_rule_offset, extension[2]);
     for (int i = 0; i < 4; ++i) extension[i + 3] = (uint8_t)(extension_hash >> (i * 8));
@@ -1237,7 +1241,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_antialias = antialias;
     const uint8_t *f = backup.flags;
     s_sleep = (app_sleep_mode_t)f[BK_SLEEP];
-    s_staged_shutdown = (staged_shutdown & 1) != 0;
+    s_shutdown_style = (staged_shutdown & 1) ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL;
     s_auto_lock_minutes = idle_minutes;
     s_ble_turner = (profile.home_full_refresh & 8) != 0;
     s_reader_hold_refresh = (profile.home_full_refresh & 16) != 0;

@@ -555,7 +555,8 @@ void app_loop_run(const app_loop_config_t* config) {
                     if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
                 } else if (action == UI_POWER_ACTION_SHUTDOWN) {
-                    if (!app_settings_staged_shutdown()) {
+                    app_shutdown_style_t style = app_settings_shutdown_style();
+                    if (style == APP_SHUTDOWN_FULL) {
                         power_dialog_open = false;
                         ui_gesture_reset(&power_gesture);
                         run_power_action(&ctx, current, false);
@@ -565,8 +566,11 @@ void app_loop_run(const app_loop_config_t* config) {
                         prepare_lock(&ctx, current, true);
                         extern const app_desc_t app_book;
                         main_lock_boundary();
+                        // 先浅后深走十分钟阶梯；仅浅睡不断电，按键/拿起回到关机前页面。
+                        // Staged walks the ten-minute ladder; light-only never powers off and key/pickup returns.
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
-                                             current == &app_book && app_book_reader_body_visible());
+                                             current == &app_book && app_book_reader_body_visible(),
+                                             style == APP_SHUTDOWN_LIGHT);
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -719,7 +723,7 @@ void app_loop_run(const app_loop_config_t* config) {
                     if (reader_power_lock) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();
-                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true);
+                        enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true, false);
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -750,7 +754,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         extern const app_desc_t app_book;
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
-                                             !menu_open && current == &app_book && app_book_reader_body_visible());
+                                             !menu_open && current == &app_book && app_book_reader_body_visible(), false);
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -856,7 +860,7 @@ void app_loop_run(const app_loop_config_t* config) {
             extern const app_desc_t app_book;
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
-                                 !menu_open && current == &app_book && app_book_reader_body_visible());
+                                 !menu_open && current == &app_book && app_book_reader_body_visible(), false);
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;
             poll_media(&ctx, current, &media_mounted, &media_invalidated);

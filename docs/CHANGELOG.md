@@ -17,6 +17,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 设置与锁屏的图标统一到图标库：「锁屏密码」以前复用「锁屏样式」的票根，现在是一把锁；输入密码界面上方那枚手绘的锁也换成同一枚图标；「自动休眠锁屏」的秒表换成闭眼。图标仍全部由 tools/icons/lucide 下的 SVG 生成。
   Settings and lock-screen icons now come from the icon set: the lock-screen password row no longer borrows the lock style's ticket but gets a lock, the hand-drawn lock above the PIN entry becomes the same icon, and auto sleep shows a closed eye instead of a stopwatch. Every icon is still generated from the SVGs under tools/icons/lucide.
 
+- 设置的「关机睡眠」在「彻底关机」「先浅睡，10 分钟后深睡」之外新增「仅浅睡」：电源菜单点「关机」后锁屏浅睡、永不断电，短按电源键或拿起设备直接回到关机前的页面，锁屏画面保留（整夜待机耗电高于深睡档，属预期取舍）。旧设置值不受影响；设置备份恢复时「仅浅睡」降级为先浅后深。
+  Settings › Power & sleep gains a third option “仅浅睡” (light-only) next to full shutdown and the staged ten-minute ladder: the power menu's shutdown now locks the screen into a deadline-free light sleep that never powers off, and a short press or pickup returns to the pre-shutdown page with the lock image retained (overnight idle power is higher than deep sleep, an intentional trade-off). Existing settings values are unaffected; settings backups restore light-only as the staged ladder.
+
 ## 0.3.3-rc91 / 2026-10-12
 
 - 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。

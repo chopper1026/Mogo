@@ -67,12 +67,12 @@ static bool read_pico_transfer_pause_for_sleep(void){++pause;return transfer_ok;
 static void read_pico_transfer_resume_after_sleep(void){++resume;}
 static void pico_boot_clear_resume(void){++clear_resume;}
 static void app_lock_wait_key_idle(int ms){assert(ms==800);}
-static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert(acc==(void*)1&&ms==600000);return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
+static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert(acc==(void*)1&&(ms==0||ms==600000));if(ms==0)return APP_WAKE_KEY;return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static void read_pico_pmu_drain_events(void){}
 static int64_t esp_timer_get_time(void){return 2000000;}
 static bool lock_screen_restore(uint8_t *fb){if(!cache_ok||cached_style!=style)return false;memset(fb,0x10+style,FRAME_BYTES);return true;}
-static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot){(void)h;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache);assert(pixels[0]==(draw_ok?0x10+style:0xfe));++auths;}
+static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot,bool light_only){(void)h;(void)light_only;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache);assert(pixels[0]==(draw_ok?0x10+style:0xfe));++auths;}
 static int read_pico_sd_get_info(read_pico_sd_info_t *i){i->mounted=true;return 0;}
 static void vTaskDelay(int ms){(void)ms;}
 static int epd_width(void){return 684;}
@@ -87,19 +87,22 @@ int main(void){
  // 两种来源的阅读背景只影响票根内容，不决定样式。/ Reader provenance affects ticket content, never the style.
  for(unsigned s=0;s<3;++s)for(unsigned password=0;password<2;++password)for(unsigned body=0;body<2;++body){
   reset();style=s;pin=password;reader=body;
-  enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,reader);
+  enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,reader,false);
   assert(draws[s]==1&&draws[(s+1)%3]==0&&draws[(s+2)%3]==0&&!fallback&&presents==1);
   assert(auths==password&&pause==1&&resume==1&&clear_resume==1&&ignore==3000);
   assert(font_begin==(s!=1||password)&&font_end==font_begin&&app_settings_lock_style()==s);
  }
  // 白底圆锁历史一次GC16完成后再缓存/PIN，失败恢复原清屏，自动/其他样式不走提前反馈。/ Present once from true badge history before cache/PIN; faults clear and idle/styles keep the original path.
- for(unsigned success=0;success<2;++success)for(unsigned password=0;password<2;++password){reset();style=2;pin=password;final_ok=success;s_lock_feedback_visible=feedback_seen=true;memset(panel,255,FRAME_BYTES);panel[1]=0;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(full_presents==1&&presents==1&&entry_clears==!success&&auths==password&&!s_lock_feedback_visible);}
- reset();style=2;pin=false;transfer_ok=false;s_lock_feedback_visible=feedback_seen=true;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(!full_presents&&!s_lock_feedback_visible&&!presents);
+ for(unsigned success=0;success<2;++success)for(unsigned password=0;password<2;++password){reset();style=2;pin=password;final_ok=success;s_lock_feedback_visible=feedback_seen=true;memset(panel,255,FRAME_BYTES);panel[1]=0;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(full_presents==1&&presents==1&&entry_clears==!success&&auths==password&&!s_lock_feedback_visible);}
+ reset();style=2;pin=false;transfer_ok=false;s_lock_feedback_visible=feedback_seen=true;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(!full_presents&&!s_lock_feedback_visible&&!presents);
  // 失败只用内建回退，绝不改成其他样式；传输忙时不绘锁屏。/ Draw failure falls back only to built-in art; active uploads defer lock.
- for(unsigned s=0;s<3;++s){reset();style=s;pin=false;draw_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(draws[s]==1&&fallback==1&&style==s);}
- reset();transfer_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(!presents&&!auths&&!font_begin&&clear_resume==1&&!resume);
+ for(unsigned s=0;s<3;++s){reset();style=s;pin=false;draw_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(draws[s]==1&&fallback==1&&style==s);}
+ reset();transfer_ok=false;enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(!presents&&!auths&&!font_begin&&clear_resume==1&&!resume);
  // 超时深睡保留已选择的实际画面，不重绘拼贴。/ Deep timeout retains selected art without redrawing a collage.
- for(unsigned s=0;s<3;++s){reset();style=s;pin=false;timeout=true;if(!setjmp(deep)){enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false);assert(0);}assert(presents==1&&draws[s]==1&&style==s&&!resume);}
+ for(unsigned s=0;s<3;++s){reset();style=s;pin=false;timeout=true;if(!setjmp(deep)){enter_lock_and_sleep(&hl,NULL,(void*)1,(void*)2,false,false);assert(0);}assert(presents==1&&draws[s]==1&&style==s&&!resume);}
+ // 关机睡眠"仅浅睡"：无期限浅睡，即使挂起超时标志也不下电，正常解锁恢复。/ Shutdown "light-only": deadline-free sleep; even a pending timeout never powers down and unlocks normally.
+ reset();style=1;pin=false;timeout=true;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,true);assert(presents==1&&draws[1]==1&&pause==1&&resume==1&&clear_resume==1);
+ reset();style=0;pin=true;timeout=true;enter_lock_and_sleep(&hl,&ignore,(void*)1,(void*)2,false,true);assert(presents==1&&draws[0]==1&&auths==1&&resume==1&&clear_resume==1);
  // 密码冷启动：同样式缓存才命中，跨样式/损坏时重画当前选择。/ Cold PIN gate redraws the current choice for stale/corrupt cache.
  for(unsigned s=0;s<3;++s)for(unsigned previous=0;previous<3;++previous){
   reset();style=s;pin=boot_cache=cache_ok=true;cached_style=previous;
@@ -109,7 +112,7 @@ int main(void){
  }
  for(unsigned s=0;s<3;++s){reset();style=s;pin=boot_cache=true;draw_ok=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(auths==1&&draws[s]==1&&fallback==1&&style==s);}
  reset();pin=false;app_lock_boot_gate(&hl,(void*)2,(void*)1);assert(!auths&&!font_begin);
- puts("PASS: real single-pass final collage retains white/badge history, avoids duplicate entry clear, recovers final faults and consumes feedback before cache/PIN; auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; cold gate cache/fault fallback keeps selected style");
+ puts("PASS: real single-pass final collage retains white/badge history, avoids duplicate entry clear, recovers final faults and consumes feedback before cache/PIN; auto/manual lock entry chooses ticket/wallpaper/collage with/without PIN and reader background; upload deferral; deep timeout; shutdown light-only never hands off with or without PIN; cold gate cache/fault fallback keeps selected style");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:

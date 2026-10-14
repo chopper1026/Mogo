@@ -16,6 +16,8 @@
  * User revision: manual collage locks promptly present white and a round lock, then present the complete collage once with original GC16; remove placeholders and four-pass reveal.
  * 用户修订：合入官方 a2a63a6 的外设停用、IOE 收口与 CPU 浅睡保持；保留十分钟浅睡、密码和阅读检查点。
  * User revision: port official a2a63a6 peripheral/IOE parking and CPU light-sleep retention while preserving ten-minute light sleep, PIN and reader checkpoints.
+ * 用户修订：锁屏入口带仅浅睡开关——关机睡眠选"仅浅睡"时锁屏无期限浅睡、永不断电；其余入口维持十分钟深睡阶梯。
+ * User revision: the lock entry takes a light-only switch--shutdown style "light-only" sleeps without deadline and never powers off; other entries keep the ten-minute deep ladder.
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
@@ -439,7 +441,7 @@ void app_restart_host(void) {
 
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
-    bool reader_background
+    bool reader_background, bool light_only
 ) {
     bool feedback_visible = s_lock_feedback_visible;
     s_lock_feedback_visible = false;
@@ -482,13 +484,13 @@ void enter_lock_and_sleep(
     if (lock_style == 1 && lock_drawn && result == EPD_DRAW_SUCCESS) ui_wallpaper_cache_commit(framebuffer);
 
     app_lock_wait_key_idle(800);
-    // 锁屏先浅睡，十分钟后进入深睡；按键唤醒使用已保存的页面检查点。
-    // Locks light-sleep first, enter deep sleep after ten minutes and wake through the saved page checkpoint.
+    // 锁屏先浅睡，十分钟后进入深睡；关机睡眠"仅浅睡"无期限浅睡不断电；按键唤醒使用已保存的页面检查点。
+    // Locks light-sleep first and deep-sleeps after ten minutes; shutdown style "light-only" sleeps without a deadline and never powers off. Key wake uses the saved page checkpoint.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
     app_wake_source_t wake = APP_WAKE_KEY;
-    if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false);
-    else wake = app_light_sleep_wait_timed(acc, APP_LOCK_LIGHT_SLEEP_MS);
+    if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false, light_only);
+    else wake = app_light_sleep_wait_timed(acc, light_only ? 0 : APP_LOCK_LIGHT_SLEEP_MS);
     if (wake == APP_WAKE_TIMEOUT) {
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
         // power-key press boots the host; the e-paper keeps this lock image.
@@ -525,6 +527,6 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             app_settings_lock_style() == 2 ? book_lock_collage_draw(fb) : draw_wallpaper(fb);
         if (!drawn) { memset(fb, 255, (size_t)epd_width() * epd_height() / 2); ui_draw_full_image(fb, lock_4bpp_bin_start); }
     }
-    lock_screen_authenticate(hl, touch, acc, true);
+    lock_screen_authenticate(hl, touch, acc, true, false);
     app_font_end_lock(&saved);
 }

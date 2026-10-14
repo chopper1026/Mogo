@@ -26,10 +26,15 @@ void app_settings_init(void);
 app_sleep_mode_t app_settings_sleep_mode(void);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
-/// 电源菜单“关机”：false 为彻底断电，true 为先浅睡 10 分钟再由 PMU 软睡断电。
-/// Power-menu shutdown: false powers fully off; true light-sleeps for 10 minutes, then PMU soft-sleeps.
-bool app_settings_staged_shutdown(void);
-void app_settings_set_staged_shutdown(bool staged);
+/// 电源菜单"关机"的方式。彻底关机：立即断电，长按开机；先浅后深：锁屏浅睡十分钟后断电，短按开机；仅浅睡：锁屏浅睡永不断电，按键/拿起返回关机前页面。
+/// Power-menu shutdown style. Full: immediate power-off, long-press boots; staged: lock, light-sleep ten minutes, then power off, short-press boots; light-only: lock sleeps forever without powering off, key/pickup returns.
+typedef enum {
+    APP_SHUTDOWN_FULL = 0,
+    APP_SHUTDOWN_STAGED = 1,
+    APP_SHUTDOWN_LIGHT = 2,
+} app_shutdown_style_t;
+app_shutdown_style_t app_settings_shutdown_style(void);
+void app_settings_set_shutdown_style(app_shutdown_style_t style);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);

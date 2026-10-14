@@ -190,7 +190,7 @@ int main(void) {
     s_reader_power_turn = true;
     s_reader_immersive = true;
     s_shelf_style = 3;
-    s_staged_shutdown = true;
+    s_shutdown_style = APP_SHUTDOWN_STAGED;
     s_auto_lock_minutes = 5;
     s_home_full_refresh = true;
     s_ble_turner = true;
@@ -297,7 +297,7 @@ int main(void) {
     s_reader_power_turn = false;
     s_reader_immersive = false;
     s_shelf_style = 2;
-    s_staged_shutdown = false;
+    s_shutdown_style = APP_SHUTDOWN_FULL;
     s_auto_lock_minutes = 0;
     s_main_refresh=APP_MAIN_REFRESH_NORMAL;
     s_home_full_refresh = false;
@@ -326,7 +326,7 @@ int main(void) {
     assert(s_book_px == 62 && s_book_tracking == 4 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 2);
-    assert(s_staged_shutdown&&app_settings_auto_lock_minutes()==5);
+    assert(s_shutdown_style == APP_SHUTDOWN_STAGED && app_settings_auto_lock_minutes() == 5);
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
     assert(app_settings_reader_vertical_turn());
@@ -465,7 +465,7 @@ int main(void) {
     commit_fails = false;
     assert(app_settings_backup_restore() == ESP_OK && s_book_px == 70 &&
            s_reader_full_pages == 0 && app_settings_book_reading_line_offset() == -8 &&
-           s_staged_shutdown);
+           s_shutdown_style == APP_SHUTDOWN_STAGED);
     assert(!strcmp(saved_wifi.ssid, "Home_2.4G"));
 
     /* PICOSET3 backups predate the shutdown choice and restore the safe off default. */
@@ -484,7 +484,7 @@ int main(void) {
     assert(fwrite(&legacy, 1, sizeof(legacy), file) == sizeof(legacy));
     assert(fwrite(v3_extension, 1, sizeof(v3_extension), file) == sizeof(v3_extension));
     assert(fclose(file) == 0);
-    assert(app_settings_backup_restore() == ESP_OK && !s_staged_shutdown);
+    assert(app_settings_backup_restore() == ESP_OK && s_shutdown_style == APP_SHUTDOWN_FULL);
 
     assert(!s_home_full_refresh && !strcmp(s_device_name, "kiikoread") && !s_status_signature[0]);
     assert(!strcmp(saved_wifi.ssid, "Home_2.4G")); /* Old backups leave network alone. */
