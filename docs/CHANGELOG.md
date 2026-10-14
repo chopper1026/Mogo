@@ -22,8 +22,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 官网刷机、TF、联网 OTA 与 GitHub Release 来自同一次产品构建，保留历史固定下载地址。
   Publish one product build for USB, TF, OTA and GitHub Releases while retaining immutable older downloads.
 
-- 设置的「关机睡眠」在「彻底关机」「先浅睡，10 分钟后深睡」之外新增「仅浅睡」：电源菜单点「关机」后锁屏浅睡、永不断电，短按电源键或拿起设备直接回到关机前的页面，锁屏画面保留（整夜待机耗电高于深睡档，属预期取舍）。旧设置值不受影响；设置备份恢复时「仅浅睡」降级为先浅后深。
-  Settings › Power & sleep gains a third option “仅浅睡” (light-only) next to full shutdown and the staged ten-minute ladder: the power menu's shutdown now locks the screen into a deadline-free light sleep that never powers off, and a short press or pickup returns to the pre-shutdown page with the lock image retained (overnight idle power is higher than deep sleep, an intentional trade-off). Existing settings values are unaffected; settings backups restore light-only as the staged ladder.
+- 设置的「关机睡眠」在「彻底关机」「先浅睡，10 分钟后深睡」之外新增「仅浅睡」：电源菜单点「关机」、电源键短按锁屏、阅读器长按锁屏与空闲自动锁都改为锁屏浅睡、永不断电，短按电源键或拿起设备直接回到锁屏前的页面，锁屏画面保留（整夜待机耗电高于深睡档，属预期取舍）。旧设置值不受影响；设置备份恢复时「仅浅睡」降级为先浅后深。
+  Settings › Power & sleep gains a third option “仅浅睡” (light-only) next to full shutdown and the staged ten-minute ladder: every lock entry — the power menu's shutdown, a short power-key press, the reader long-press lock and the idle auto-lock — now sleeps without a deadline and never powers off, and a short press or pickup returns to the pre-lock page with the lock image retained (overnight idle power is higher than deep sleep, an intentional trade-off). Existing settings values are unaffected; settings backups restore light-only as the staged ladder.
 
 ## 0.3.3-rc91 / 2026-10-12
 

@@ -1114,13 +1114,13 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
             if (active) epd_fill_circle(609, box.y + box.height / 2, 8, UI_GRAY_BLACK, fb);
         }
         ui_text(fb, 48, 760, 23, "操作后重新计时，传输和升级期间暂停", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 48, 810, 23, "锁屏先浅睡，10 分钟后进入深睡", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 48, 810, 23, "锁屏浅睡；“仅浅睡”时永不断电", EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "关机睡眠");
-        section(fb, 248, "选择电源菜单中“关机”的方式");
+        section(fb, 248, "选择“关机”和锁屏的睡眠方式");
         const char *labels[] = {"彻底关机", "先浅睡，10 分钟后深睡", "仅浅睡"};
         const char *details[] = {"完全断电，长按电源键开机",
                                  "锁屏画面保留；深睡后短按电源键开机",
