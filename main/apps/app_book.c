@@ -3027,9 +3027,12 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
     else if(s_reader_cleanup&&s_reader_turn_pending&&s_view==READING&&
         s_reader_panel==READER_PANEL_NONE&&!s_toolbar&&!s_clear_confirm) {
-        // 纯文字自动清屏沿用后续普通页的文字梯子，避免清屏页单独变浅。
-        // Use the ordinary text ladder after pure-text cleanup, avoiding a different pale cleanup page.
-        err=update_display_reader_cleanup(ctx->hl,display_reader_text_waveform());
+        // 纯文字自动清屏用原厂未调序的 GL16 文字表从白重绘：调序表只为普通翻页差分的
+        // 柔和灰边整定，从白全页成像会让抗锯齿浅灰边缘偏深（字变粗），实机已验证。
+        // Pure-text cleanup redraws from white with the unmodified factory GL16 text table:
+        // the reordered ladder is tuned for differential turns only, and full-page from-white
+        // imaging drives antialiased gray edges too dark (bolder glyphs, confirmed on device).
+        err=update_display_reader_cleanup(ctx->hl,&E0470_TEXTTURN_WAVEFORM);
     }
     else if (redraw == APP_REDRAW_FULL || s_reader_cleanup) err = update_display_full(ctx->hl);
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
