@@ -662,6 +662,13 @@ void app_loop_run(const app_loop_config_t* config) {
                 int64_t first_ms = 0, last_ms = 0;
 #endif
                 while (touch_sampler_pop(&f)) {
+                    // 回放必须同步最近帧：复用路径的「边沿天然无变化」前提依赖
+                    // s_last_frame 与 was_touched 同步；否则阻塞前残留的按下帧
+                    // 会在回放排空后制造假按下沿（实测工具栏连点链，根因）。
+                    // / Replay must keep the last-frame cache in sync: the reuse
+                    // path assumes edges are unchanged, which breaks if the cache
+                    // still holds a stale press frame (measured toolbar chain).
+                    s_last_frame = f;
                     frame_to_touch(&f, &touch);
                     ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
                                        (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
