@@ -38,6 +38,16 @@ void app_settings_set_shutdown_style(app_shutdown_style_t style);
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);
+/// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
+typedef enum {
+    APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,
+    // 3为旧组件的保留编号，不能重排已有配置。/ ID 3 is retired; preserve existing persisted IDs.
+    APP_HOME_MOON = 4, APP_HOME_KEHAI = 5, APP_HOME_DALI = 6, APP_HOME_CAT = 7, APP_HOME_HOUSE = 8, APP_HOME_COMPONENT_COUNT = 9
+} app_home_component_t;
+app_home_component_t app_settings_home_component(void);
+esp_err_t app_settings_set_home_component(app_home_component_t component);
+uint8_t app_settings_home_goal_minutes(void);
+esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes);
 /// 主页刷新模式，只控制四个主页面；默认普通。/ Main-tab refresh mode; ordinary by default.
 typedef enum {
     APP_MAIN_REFRESH_NORMAL = 0, ///< 普通灰阶 / Ordinary grayscale
@@ -87,6 +97,11 @@ void app_settings_set_pickup_wake(bool on);
 /// 阅读默认字号，36..72，默认 48。/ Default reading size, 36..72, initially 48.
 /// Reading stroke weight -2..2: thin, lighter, native, heavier, bold.
 int8_t app_settings_book_weight(void);
+#define APP_BOOK_WEIGHT_SUBSTEPS 16
+#define APP_BOOK_WEIGHT_FINE_MAX 32
+/// 一档为1/16像素，旧像素值继续兼容。/ One step is 1/16 pixel; legacy pixel values remain compatible.
+int8_t app_settings_book_weight_fine(void);
+bool app_settings_set_book_weight_fine(int8_t steps);
 bool app_settings_set_book_weight(int8_t level);
 /// 阅读抗锯齿默认开启；关闭只改变字形边缘，不改变排版或图片。/ Reading AA defaults on; disabling affects glyph edges, not layout or images.
 bool app_settings_book_antialias(void);

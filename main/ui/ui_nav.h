@@ -17,6 +17,8 @@ void ui_nav_status(uint8_t *fb);
 /// 当前 UTC 分钟，用于显示更新判断；不读取卡或请求网络校时。
 /// Current UTC minute for display updates, without card IO or network time requests.
 int64_t ui_nav_clock_minute(void);
+/// 只绘制状态栏时间，供主页面按分钟局部更新。/ Draw only the status clock for local minute updates.
+void ui_nav_clock_draw(uint8_t *fb);
 /// 绘制设置页与状态栏共用的 WiFi 标志。/ Draw the WiFi mark shared by Settings and the status bar.
 void ui_nav_wifi_icon(uint8_t *fb, int cx, int cy, int size, uint8_t gray);
 /// 二级页面共用的圆形返回按钮。/ Shared circular back control for secondary pages.

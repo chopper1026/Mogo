@@ -35,6 +35,8 @@
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_HOME_FULL "home_full"
+#define NVS_KEY_HOME_COMPONENT "home_widget"
+#define NVS_KEY_HOME_GOAL "home_goal"
 #define NVS_KEY_MAIN_REFRESH "main_mode"
 #define NVS_KEY_AUTO_LOCK "idle_lock"
 #define NVS_KEY_DEVICE_NAME "dev_name"
@@ -51,6 +53,7 @@
 #define NVS_KEY_PICKUP "pickup"
 #define NVS_KEY_BOOK_PX "bk_px"
 #define NVS_KEY_BOOK_WEIGHT "bk_weight"
+#define NVS_KEY_BOOK_WEIGHT_FINE "bk_wfine"
 #define NVS_KEY_BOOK_AA "bk_aa"
 #define NVS_KEY_BOOK_BACKGROUND "bk_bg"
 #define NVS_KEY_READER_FULL "rd_gc16"
@@ -84,6 +87,8 @@
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static app_shutdown_style_t s_shutdown_style = APP_SHUTDOWN_FULL;
 static bool s_home_full_refresh;
+static app_home_component_t s_home_component = APP_HOME_FOLDER;
+static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh;
 static char s_device_name[64] = "kiikoread";
 static char s_avatar[288];
@@ -99,6 +104,7 @@ static uint8_t s_last_boot;
 static bool s_pickup_wake;
 static uint8_t s_book_px = 48;
 static uint8_t s_book_weight = 2;
+static int8_t s_book_weight_fine;
 static bool s_book_antialias = true;
 static char s_book_background[288];
 static uint8_t s_reader_full_pages = 15;
@@ -191,6 +197,11 @@ void app_settings_init(void) {
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
+    s_home_component = nvs_get_u8(h, NVS_KEY_HOME_COMPONENT, &raw) == ESP_OK && raw < APP_HOME_COMPONENT_COUNT
+        ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_FOLDER;
+    raw = 30;
+    s_home_goal_minutes = nvs_get_u8(h, NVS_KEY_HOME_GOAL, &raw) == ESP_OK && raw >= 5 && raw <= 180 && raw % 5 == 0 ? raw : 30;
+    raw = 0;
     s_main_refresh = nvs_get_u8(h, NVS_KEY_MAIN_REFRESH, &raw) == ESP_OK && raw <= APP_MAIN_REFRESH_WATER
         ? (app_main_refresh_mode_t)raw : APP_MAIN_REFRESH_NORMAL;
     raw = 0;
@@ -237,6 +248,10 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_PICKUP, &pickup) == ESP_OK) s_pickup_wake = pickup != 0;
     uint8_t weight = 2;
     s_book_weight = nvs_get_u8(h, NVS_KEY_BOOK_WEIGHT, &weight) == ESP_OK && weight <= 4 ? weight : 2;
+    s_book_weight_fine = ((int)s_book_weight-2)*APP_BOOK_WEIGHT_SUBSTEPS;
+    uint8_t fine = 32;
+    if(nvs_get_u8(h,NVS_KEY_BOOK_WEIGHT_FINE,&fine)==ESP_OK && fine<=64)
+        s_book_weight_fine=(int)fine-APP_BOOK_WEIGHT_FINE_MAX;
     uint8_t antialias = 1;
     s_book_antialias = nvs_get_u8(h, NVS_KEY_BOOK_AA, &antialias) != ESP_OK || antialias != 0;
     uint8_t book_px = 48;
@@ -368,6 +383,30 @@ void app_settings_set_shutdown_style(app_shutdown_style_t style) {
     s_shutdown_style = style;
     // 旧固件把值 2（仅浅睡）读成 false（彻底关机），降级安全。/ Old firmware reads 2 (light-only) as false (full off): a safe downgrade.
     nvs_put_u8(NVS_KEY_SHUTDOWN_MODE, (uint8_t)style);
+}
+
+app_home_component_t app_settings_home_component(void) { return s_home_component; }
+uint8_t app_settings_home_goal_minutes(void) { return s_home_goal_minutes; }
+static esp_err_t home_preference_save(const char *key, uint8_t value) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_u8(h, key, value);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+esp_err_t app_settings_set_home_component(app_home_component_t component) {
+    if ((unsigned)component >= APP_HOME_COMPONENT_COUNT || component == 3) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = home_preference_save(NVS_KEY_HOME_COMPONENT, component);
+    if (err == ESP_OK) s_home_component = component;
+    return err;
+}
+esp_err_t app_settings_set_home_goal_minutes(uint8_t minutes) {
+    if (minutes < 5 || minutes > 180 || minutes % 5) return ESP_ERR_INVALID_ARG;
+    esp_err_t err = home_preference_save(NVS_KEY_HOME_GOAL, minutes);
+    if (err == ESP_OK) s_home_goal_minutes = minutes;
+    return err;
 }
 
 bool app_settings_home_full_refresh(void) { return s_home_full_refresh; }
@@ -522,17 +561,22 @@ bool app_settings_set_book_antialias(bool enabled) {
     if (err == ESP_OK) s_book_antialias = enabled;
     return err == ESP_OK;
 }
-bool app_settings_set_book_weight(int8_t level) {
-    if (level < -2 || level > 2) return false;
-    uint8_t encoded = (uint8_t)(level + 2);
-    if (encoded == s_book_weight) return true;
+int8_t app_settings_book_weight_fine(void) {return s_book_weight_fine;}
+bool app_settings_set_book_weight_fine(int8_t steps) {
+    if(steps < -APP_BOOK_WEIGHT_FINE_MAX || steps > APP_BOOK_WEIGHT_FINE_MAX)return false;
+    if(steps==s_book_weight_fine)return true;
+    uint8_t legacy=(uint8_t)(steps/APP_BOOK_WEIGHT_SUBSTEPS+2);
     nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
-    esp_err_t err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT, encoded);
-    if (err == ESP_OK) err = nvs_commit(h);
+    if(nvs_open(NVS_NS,NVS_READWRITE,&h)!=ESP_OK)return false;
+    esp_err_t err=nvs_set_u8(h,NVS_KEY_BOOK_WEIGHT_FINE,steps+APP_BOOK_WEIGHT_FINE_MAX);
+    if(err==ESP_OK)err=nvs_set_u8(h,NVS_KEY_BOOK_WEIGHT,legacy);
+    if(err==ESP_OK)err=nvs_commit(h);
     nvs_close(h);
-    if (err == ESP_OK) s_book_weight = encoded;
-    return err == ESP_OK;
+    if(err==ESP_OK){s_book_weight=legacy;s_book_weight_fine=steps;}
+    return err==ESP_OK;
+}
+bool app_settings_set_book_weight(int8_t level) {
+    return level>=-2&&level<=2&&app_settings_set_book_weight_fine(level*APP_BOOK_WEIGHT_SUBSTEPS);
 }
 
 uint8_t app_settings_book_px(void) {
@@ -823,7 +867,7 @@ static uint32_t backup_weight_checksum(const settings_backup_weight_t *weight) {
 static bool backup_weight_valid(const settings_backup_weight_t *weight) {
     uint32_t stored = 0;
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)weight->checksum[i] << (8 * i);
-    return weight->encoded <= 4 && stored == backup_weight_checksum(weight);
+    return (weight->encoded <= 4 || (weight->encoded>=128&&weight->encoded<=192)) && stored == backup_weight_checksum(weight);
 }
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
@@ -838,10 +882,19 @@ static bool backup_background_valid(const settings_backup_background_t *backgrou
         (!background->path[0] || !strncmp(background->path, "/sdcard/pictures/", 17)) &&
         stored == backup_background_checksum(background);
 }
+typedef struct { uint8_t component, minutes, checksum[4]; } settings_backup_home_t;
+static uint32_t backup_home_checksum(const settings_backup_home_t *v) {
+    return ((2166136261u ^ v->component) * 16777619u ^ v->minutes) * 16777619u;
+}
+static bool backup_home_valid(const settings_backup_home_t *v) {
+    uint32_t crc = 0;
+    for (unsigned i = 0; i < 4; ++i) crc |= (uint32_t)v->checksum[i] << (8*i);
+    return v->component < APP_HOME_COMPONENT_COUNT && v->minutes >= 5 && v->minutes <= 180 && !(v->minutes % 5) && crc == backup_home_checksum(v);
+}
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -921,7 +974,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETF", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETH", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -981,7 +1034,7 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_indent_adjust_t adjust = {.encoded = s_book_indent_adjust};
     uint32_t adjust_hash = backup_indent_adjust_checksum(&adjust);
     for (unsigned i = 0; i < 4; ++i) adjust.checksum[i] = (uint8_t)(adjust_hash >> (8 * i));
-    settings_backup_weight_t weight = {.encoded = s_book_weight};
+    settings_backup_weight_t weight = {.encoded = 128+s_book_weight_fine+APP_BOOK_WEIGHT_FINE_MAX};
     uint32_t weight_hash = backup_weight_checksum(&weight);
     for (unsigned i = 0; i < 4; ++i) weight.checksum[i] = (uint8_t)(weight_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
@@ -1004,6 +1057,10 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&weight, 1, sizeof(weight), file) == sizeof(weight);
     if (ok) ok = fwrite(&wifi, 1, sizeof(wifi), file) == sizeof(wifi);
     if (ok) ok = fwrite(&background, 1, sizeof(background), file) == sizeof(background);
+    settings_backup_home_t home = {.component=s_home_component, .minutes=s_home_goal_minutes};
+    uint32_t home_hash = backup_home_checksum(&home);
+    for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
+    if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1086,6 +1143,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_wifi_t wifi = {0};
     bool has_wifi = false;
     settings_backup_background_t background = {0};
+    settings_backup_home_t home = {.component=APP_HOME_FOLDER, .minutes=30};
     app_main_refresh_mode_t main_refresh = APP_MAIN_REFRESH_NORMAL;
     if (ok && !memcmp(backup.magic, "PICOSET2", 8)) {
         uint8_t extension[5];
@@ -1140,12 +1198,13 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 12)
         ok = fread(&adjust, 1, sizeof(adjust), file) == sizeof(adjust) && backup_indent_adjust_valid(&adjust);
     if (ok && version >= 13)
-        ok = fread(&weight, 1, sizeof(weight), file) == sizeof(weight) && backup_weight_valid(&weight);
+        ok = fread(&weight, 1, sizeof(weight), file) == sizeof(weight) && backup_weight_valid(&weight) && (version>=17 || weight.encoded<=4);
     long history_position = -1;
     has_wifi = ok && version >= 7;
     if (has_wifi) ok = fread(&wifi, 1, sizeof(wifi), file) == sizeof(wifi) && backup_wifi_valid(&wifi);
     if (ok && version >= 14) ok = fread(&background, 1, sizeof(background), file) == sizeof(background) &&
         backup_background_valid(&background) && backup_path_valid(background.path, sizeof(background.path));
+    if (ok && version >= 16) ok = fread(&home, 1, sizeof(home), file) == sizeof(home) && backup_home_valid(&home);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1160,6 +1219,8 @@ esp_err_t app_settings_backup_restore(void) {
     backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
     if (version < 15) backup.flags[BK_SHAKE] = 0; // 旧晃动标志不改变AA。/ Old shake flags never affect AA.
     reader_keys_repair(keys.actions, hold.action);
+    // 已删除组件的备份仍可恢复，其余字段不受影响。/ Restore retired widget backups without rejecting other preferences.
+    if (home.component == 3) home.component = APP_HOME_CLOCK;
     // The backup contains paths, not the corresponding font or image bytes.
     // 备份只含资源路径；资源已被删除时回退到安全的内建选项。
     if (backup.font[0] && !backup_file_exists(backup.font, false)) backup.font[0] = 0;
@@ -1194,6 +1255,8 @@ esp_err_t app_settings_backup_restore(void) {
 
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_FULL, profile.home_full_refresh & 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_MAIN_REFRESH, (uint8_t)main_refresh);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_COMPONENT, home.component);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOME_GOAL, home.minutes);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HIDE_IMAGES, (profile.home_full_refresh & 2) != 0);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHELF_RECENT, (profile.home_full_refresh & 4) != 0);
     if (err == ESP_OK) err = nvs_set_str(h, NVS_KEY_DEVICE_NAME, profile.device_name);
@@ -1212,7 +1275,9 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
-    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT, weight.encoded);
+    int fine_weight=weight.encoded<=4?((int)weight.encoded-2)*APP_BOOK_WEIGHT_SUBSTEPS:(int)weight.encoded-128-APP_BOOK_WEIGHT_FINE_MAX;
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT, fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_WEIGHT_FINE, fine_weight+APP_BOOK_WEIGHT_FINE_MAX);
     const bool antialias = version < 15 || backup.flags[BK_SHAKE] == 0;
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_AA, antialias ? 1 : 0);
     BACKUP_SET_U8(NVS_KEY_BOOK_RULE, BK_READING_LINE);
@@ -1237,7 +1302,8 @@ esp_err_t app_settings_backup_restore(void) {
 
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;
-    s_book_weight = weight.encoded;
+    s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
+    s_book_weight_fine = fine_weight;
     s_book_antialias = antialias;
     const uint8_t *f = backup.flags;
     s_sleep = (app_sleep_mode_t)f[BK_SLEEP];
@@ -1273,6 +1339,8 @@ esp_err_t app_settings_backup_restore(void) {
     s_book_para = f[BK_PARAGRAPH];
     s_shelf_style = f[BK_SHELF];
     strlcpy(s_book_background, background.path, sizeof(s_book_background));
+    s_home_component = (app_home_component_t)home.component;
+    s_home_goal_minutes = home.minutes;
     strlcpy(s_font, backup.font, sizeof(s_font));
     strlcpy(s_system_font, backup.system_font, sizeof(s_system_font));
     strlcpy(s_wallpaper, backup.wallpaper, sizeof(s_wallpaper));

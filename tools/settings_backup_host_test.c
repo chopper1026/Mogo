@@ -71,27 +71,32 @@ static bool has_hold;
 static bool keys_v2;
 static uint8_t loaded_weight=2;
 static bool has_weight;
+static uint8_t loaded_fine=32;static bool has_fine;
 static uint8_t loaded_aa=1;
 static bool has_aa;
 static uint8_t loaded_adjust=20;
 static bool has_adjust;
 static uint8_t loaded_keys[3];
 static bool has_keys[3];
-static int loaded_shelf=-1, loaded_lock=-1;
+static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) { (void)h; (void)key; (void)value; (void)size; return ESP_FAIL; }
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
 int main(void) {
+    loaded_home=3;app_settings_init();assert(app_settings_home_component()==APP_HOME_CLOCK);
+    loaded_home=APP_HOME_MOON;app_settings_init();assert(app_settings_home_component()==APP_HOME_MOON);
+    loaded_home=-1;keys_v2=false;
+
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     app_settings_set_book_margin(0);assert(app_settings_book_margin()==0);
     app_settings_set_book_margin(24);assert(app_settings_book_margin()==24);
@@ -113,7 +118,12 @@ int main(void) {
     assert(!app_settings_set_book_weight(3));
     commit_fails=true;assert(!app_settings_set_book_weight(-1)&&app_settings_book_weight()==2);commit_fails=false;
     assert(app_settings_set_book_weight(-1));
-    loaded_weight=255;app_settings_init();assert(app_settings_book_weight()==0);
+    loaded_weight=255;has_fine=false;app_settings_init();assert(app_settings_book_weight()==0);
+    assert(app_settings_set_book_weight_fine(1)&&app_settings_book_weight_fine()==1&&loaded_fine==33);
+    app_settings_init();assert(app_settings_book_weight_fine()==1);
+    assert(!app_settings_set_book_weight_fine(33)&&app_settings_book_weight_fine()==1);
+    commit_fails=true;assert(!app_settings_set_book_weight_fine(2)&&app_settings_book_weight_fine()==1);commit_fails=false;
+    has_fine=false;loaded_weight=4;app_settings_init();assert(app_settings_book_weight_fine()==32);
     assert(app_settings_set_book_weight(1));
     assert(app_settings_book_antialias());
     assert(app_settings_set_book_antialias(false)&&loaded_aa==0);
@@ -218,7 +228,7 @@ int main(void) {
     assert(fread(&saved_adjust,1,sizeof(saved_adjust),saved)==sizeof(saved_adjust)&&backup_indent_adjust_valid(&saved_adjust));
     settings_backup_weight_t saved_weight;
     assert(fread(&saved_weight,1,sizeof(saved_weight),saved)==sizeof(saved_weight)&&backup_weight_valid(&saved_weight));
-    assert(saved_weight.encoded==3);
+    assert(saved_weight.encoded==176);
     settings_backup_wifi_t saved_network;
     assert(fread(&saved_network, 1, sizeof(saved_network), saved) == sizeof(saved_network));
     assert(fclose(saved) == 0);
@@ -314,7 +324,7 @@ int main(void) {
     const int prior_restore_commits = commit_count;
     assert(app_settings_backup_restore() == ESP_OK);
     assert(history_restores == 1);
-    assert(app_settings_book_weight()==1);
+    assert(app_settings_book_weight()==1&&app_settings_book_weight_fine()==16);
     assert(!app_settings_book_antialias()&&loaded_aa==0);
     assert(app_settings_reader_key_action(0)==APP_READER_KEY_TOOLS && app_settings_reader_key_action(1)==APP_READER_KEY_FULLSCREEN && app_settings_reader_key_action(2)==APP_READER_KEY_REFRESH);
     assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER && loaded_main_mode==2);
@@ -355,9 +365,9 @@ int main(void) {
     long v11_network_at=ftell(saved);assert(fseek(saved,0,SEEK_END)==0);long v12_end=ftell(saved);
     size_t v11_tail_bytes=(size_t)(v12_end-v11_network_at);uint8_t *v11_tail=malloc(v11_tail_bytes);assert(v11_tail);
     assert(fseek(saved,v11_network_at,SEEK_SET)==0&&fread(v11_tail,1,v11_tail_bytes,saved)==v11_tail_bytes);
-    /* Legacy backups omit the v14 background between WiFi and history. */
-    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+sizeof(settings_backup_background_t), v11_tail_bytes-sizeof(settings_backup_wifi_t)-sizeof(settings_backup_background_t));
-    v11_tail_bytes-=sizeof(settings_backup_background_t);v12_end-=(long)sizeof(settings_backup_background_t);
+    /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
+    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v11_tail_bytes-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    v11_tail_bytes-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v12_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
     memcpy(legacy_header.magic,"PICOSETB",8);backup_seal(&legacy_header);
     uint32_t v11_hash=backup_shutdown_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2]);
     for(int i=0;i<4;++i)legacy_ext[i+3]=(uint8_t)(v11_hash>>(8*i));
@@ -385,9 +395,9 @@ int main(void) {
     assert(fseek(saved,0,SEEK_END)==0);long v11_end=ftell(saved);
     size_t v10_tail_size=(size_t)(v11_end-v10_tail_start);uint8_t *v10_tail=malloc(v10_tail_size);assert(v10_tail);
     assert(fseek(saved,v10_tail_start,SEEK_SET)==0&&fread(v10_tail,1,v10_tail_size,saved)==v10_tail_size);
-    /* Legacy backups omit the v14 background between WiFi and history. */
-    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+sizeof(settings_backup_background_t), v10_tail_size-sizeof(settings_backup_wifi_t)-sizeof(settings_backup_background_t));
-    v10_tail_size-=sizeof(settings_backup_background_t);v11_end-=(long)sizeof(settings_backup_background_t);
+    /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
+    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), v10_tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    v10_tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));v11_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
     saved_keys.actions[0]=APP_READER_KEY_HOME;saved_keys.actions[1]=APP_READER_KEY_FULLSCREEN;saved_keys.actions[2]=APP_READER_KEY_REFRESH;
     uint32_t missing_tools_hash=backup_keys_checksum(&saved_keys);
     for(int i=0;i<4;++i)saved_keys.checksum[i]=(uint8_t)(missing_tools_hash>>(i*8));
@@ -424,9 +434,9 @@ int main(void) {
     assert(fseek(saved,0,SEEK_END)==0);long file_end=ftell(saved);
     size_t tail_size=(size_t)(file_end-tail_start);uint8_t *tail=malloc(tail_size);assert(tail);
     assert(fseek(saved,tail_start,SEEK_SET)==0&&fread(tail,1,tail_size,saved)==tail_size);
-    /* Legacy backups omit the v14 background between WiFi and history. */
-    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+sizeof(settings_backup_background_t), tail_size-sizeof(settings_backup_wifi_t)-sizeof(settings_backup_background_t));
-    tail_size-=sizeof(settings_backup_background_t);file_end-=(long)sizeof(settings_backup_background_t);
+    /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
+    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)), tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)));
+    tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));file_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t));
     rewind(saved);assert(fwrite(&legacy_header,1,sizeof(legacy_header),saved)==sizeof(legacy_header));
     assert(fwrite(legacy_ext,1,sizeof(legacy_ext),saved)==sizeof(legacy_ext));
     assert(fwrite(&saved_profile,1,sizeof(saved_profile),saved)==sizeof(saved_profile));
@@ -593,6 +603,8 @@ int main(void) {
     assert(app_settings_backup_save()==ESP_OK);
     s_lock_style=0;assert(app_settings_backup_restore()==ESP_OK&&app_settings_lock_style()==2);
     assert(loaded_lock==2&&!s_wallpaper[0]);
+    s_home_component=(app_home_component_t)3;assert(app_settings_backup_save()==ESP_OK);
+    s_home_component=APP_HOME_KEHAI;assert(app_settings_backup_restore()==ESP_OK&&app_settings_home_component()==APP_HOME_CLOCK);
     assert(remove(BACKUP_FILE)==0);
     puts("settings backup host test passed (200% sizes, retired shelf migration, collage persistence/restore without wallpaper)");
     return 0;

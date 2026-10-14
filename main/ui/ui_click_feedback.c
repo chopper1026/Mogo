@@ -89,11 +89,16 @@ bool ui_click_feedback_press(uint8_t *fb, int x, int y, EpdRect *area) {
         for (int yy = 0; yy < r.height; ++yy) for (int xx = 0; xx < r.width; ++xx)
             s_pixels[yy * r.width + xx] = read_pixel(fb, r.x + xx, r.y + yy);
         int cx = r.x + r.width / 2, cy = r.y + r.height / 2;
-        if (s_active.kind == UI_CLICK_BACK) {
+        if (s_active.kind == UI_CLICK_BACK || s_active.kind == UI_CLICK_BACK_SMALL) {
             epd_fill_rect(r, s_pixels[0], fb);
-            ui_fill_round_rect(fb, (EpdRect){cx - 25, cy - 24, 50, 50}, 25, 0xd0);
-            ui_draw_round_rect(fb, (EpdRect){cx - 25, cy - 24, 50, 50}, 25, 0x40);
-            ui_draw_icon(fb, cx, cy + 1, 42, s_active.icon, UI_GRAY_BLACK);
+            // 小题头返回圈保持原44px和中心，按压只改底色；其他返回圈保留原动效。
+            // Small header backs retain their 44px bounds and center, changing fill only; retain other back feedback.
+            bool small=s_active.kind==UI_CLICK_BACK_SMALL;
+            int size=small?44:50,offset=small?0:1;
+            EpdRect circle={cx-size/2,cy-size/2+offset,size,size};
+            ui_fill_round_rect(fb,circle,size/2,0xd0);
+            ui_draw_round_rect(fb,circle,size/2,0x40);
+            ui_draw_icon(fb,cx,cy+offset,small?38:42,s_active.icon,UI_GRAY_BLACK);
             if (app_settings_main_fast_refresh()) ui_image_bw_rect(fb, r);
         } else {
             // 底栏始终保留原灰底，不把整个按压缓存转成黑白点阵。

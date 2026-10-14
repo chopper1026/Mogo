@@ -46,6 +46,14 @@ void rails_idle_check(int64_t now_ms);
 /// 大量文件I/O期间增加扫描预填，调用方离开时恢复。/ Increase scan prefill during bulk file I/O; caller restores on exit.
 void display_set_bulk_io(bool active);
 
+/// 请求下一张完成绘制的画面整屏清理一次，用于解锁。/ Clean the next completed frame once after unlock.
+void display_request_full_refresh(void);
+/// 列表逐帧跟随；复用已有连续DU状态，不另分配整屏缓存。/ Follow a list one phase at a time using the existing continuous-DU state.
+enum EpdDrawError display_follow_area(EpdiyHighlevelState* hl, EpdRect area, bool changed, bool continuous);
+bool display_follow_busy(void);
+/// 完成黑白相位后，仅补变化灰阶；快刷可直接保留黑白，不扫描。/ After binary phases complete, restore changed grays only, or retain binary without scanning.
+enum EpdDrawError display_follow_settle(EpdiyHighlevelState* hl, EpdRect area, bool restore_gray);
+
 enum EpdDrawError update_display_mode(EpdiyHighlevelState* hl, enum EpdDrawMode mode);
 /// 普通页面切换使用真实差分 GL16；未变化像素不进入 dirty map。
 /// True differential GL16 for ordinary page transitions; unchanged pixels stay clean.
@@ -76,6 +84,8 @@ enum EpdDrawError update_display_from_white_with(
 /// Paint the front buffer white and GC16 the panel back to white.
 enum EpdDrawError update_display_white(EpdiyHighlevelState* hl);
 enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
+/// 纯文字自动清屏后，用与普通翻页相同的白底文字波形成像。/ After pure-text cleanup, form the target using the ordinary turn's white-to-text waveform.
+enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform);
 /// 图片页清除旧光学状态，再驱动完整灰阶。/ Clear the prior optical state and drive the full gray ladder for images.
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl);
 enum EpdDrawError update_display_with(

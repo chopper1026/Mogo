@@ -141,12 +141,6 @@ bool ui_wallpaper_draw_rounded(uint8_t *fb, const char *path, EpdRect area, int 
     return image_pixels(fb, NULL, path, area, radius);
 }
 
-// 小头像只在页外准备，绘制时复用原比例、裁白边后的像素。
-// Prepare small avatars outside painting, retaining aspect and whitespace crop.
-bool ui_wallpaper_prepare_avatar(const char *path, uint8_t *pixels, int side) {
-    if (!pixels || side < 1 || side > 128) return false;
-    return image_pixels(NULL,pixels,path,(EpdRect){0,0,side,side},1);
-}
 void ui_wallpaper_draw_avatar(uint8_t *fb, const uint8_t *pixels, EpdRect area, int radius) {
     if (!fb || !pixels || area.width != area.height || area.width < 1 || area.width > 128) return;
     for (int y=0;y<area.height;++y) for (int x=0;x<area.width;++x) {
@@ -219,4 +213,46 @@ void ui_wallpaper_cache_commit(const uint8_t *fb) {
     if (fclose(file)) good=false;
     if (good && !rename(WALL_LOCK_CACHE ".tmp",WALL_LOCK_CACHE)) return;
     (void)remove(WALL_LOCK_CACHE ".tmp");
+}
+
+#define AVATAR_CACHE_MAGIC UINT32_C(0x41565431)
+// 每个使用尺寸只存当前头像；灰阶像素与模式/对比度无关，不增加常驻内存。
+// Store one current avatar per used size; raw grays are mode/contrast independent without added resident memory.
+static bool avatar_cache_header(const char *path,int side,wallpaper_cache_t *header,char cache_path[160]) {
+    struct stat st;
+    const char *ext=path?strrchr(path,'.'):NULL;
+    if(!path||strncmp(path,"/sdcard/",8)||side<1||side>128||!ext||
+       (strcasecmp(ext,".png")&&strcasecmp(ext,".jpg")&&strcasecmp(ext,".jpeg"))||
+       stat(path,&st)||!S_ISREG(st.st_mode)||st.st_size<=0||(uint64_t)st.st_size>BOOK_IMAGE_FILE_MAX)return false;
+    *header=(wallpaper_cache_t){.magic=AVATAR_CACHE_MAGIC,.version=1,.width=side,.height=side,.bytes=(uint32_t)side*side,.key=wallpaper_key(path,&st)};
+    snprintf(cache_path,160,UI_WALLPAPER_CACHE_PARENT "/avatars/avatar-%d.bin",side);
+    return true;
+}
+bool ui_wallpaper_avatar_cached(const char *path,uint8_t *pixels,int side) {
+    wallpaper_cache_t wanted,h;char cache_path[160];
+    if(!pixels||!avatar_cache_header(path,side,&wanted,cache_path))return false;
+    FILE *file=fopen(cache_path,"rb");if(!file)return false;
+    bool good=fread(&h,1,sizeof(h),file)==sizeof(h)&&h.magic==wanted.magic&&h.version==wanted.version&&
+        h.width==wanted.width&&h.height==wanted.height&&h.rotation==0&&h.bytes==wanted.bytes&&h.key==wanted.key&&
+        fread(pixels,1,wanted.bytes,file)==wanted.bytes&&fgetc(file)==EOF&&!ferror(file)&&
+        h.checksum==wallpaper_hash(UINT64_C(14695981039346656037),pixels,wanted.bytes);
+    fclose(file);return good;
+}
+bool ui_wallpaper_prepare_avatar(const char *path,uint8_t *pixels,int side) {
+    wallpaper_cache_t h,after;char cache_path[160],after_path[160];
+    if(!pixels||!avatar_cache_header(path,side,&h,cache_path))return false;
+    if(ui_wallpaper_avatar_cached(path,pixels,side))return true;
+    if(!image_pixels(NULL,pixels,path,(EpdRect){0,0,side,side},1))return false;
+    // 文件在解码期间变化或卡不可写时直接使用当前像素，不存过期/半写的文件。
+    // Use decoded pixels without saving stale or partial files if the source changes or storage is unwritable.
+    if(!avatar_cache_header(path,side,&after,after_path)||after.key!=h.key||
+       (mkdir(UI_WALLPAPER_CACHE_PARENT,0777)&&errno!=EEXIST)||
+       (mkdir(UI_WALLPAPER_CACHE_PARENT "/avatars",0777)&&errno!=EEXIST))return true;
+    h.checksum=wallpaper_hash(UINT64_C(14695981039346656037),pixels,h.bytes);
+    char temp[168];snprintf(temp,sizeof(temp),"%s.tmp",cache_path);
+    FILE *file=fopen(temp,"wb");if(!file)return true;
+    bool good=fwrite(&h,1,sizeof(h),file)==sizeof(h)&&fwrite(pixels,1,h.bytes,file)==h.bytes;
+    if(fclose(file))good=false;
+    if(!good||rename(temp,cache_path))(void)remove(temp);
+    return true;
 }

@@ -1884,17 +1884,18 @@ static glyph_entry_t* rasterize_glyph(uint32_t codepoint, int pixel_height) {
     }
 
     if (bitmap_bytes && s_stroke_adjust) {
-        size_t adjusted_bytes = (size_t)(width + 2) * (height + 2);
+        int pad=((s_stroke_adjust<0?-s_stroke_adjust:s_stroke_adjust)+15)/16;
+        size_t adjusted_bytes = (size_t)(width + 2*pad) * (height + 2*pad);
         uint8_t *adjusted = heap_caps_malloc(adjusted_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!adjusted) {
             heap_caps_free(entry->bitmap);
             heap_caps_free(entry);
             return NULL;
         }
-        ttf_stroke_filter(adjusted, entry->bitmap, width, height, pixel_height, s_stroke_adjust);
+        ttf_stroke_filter_fine(adjusted, entry->bitmap, width, height, pixel_height, s_stroke_adjust);
         heap_caps_free(entry->bitmap);
         entry->bitmap = adjusted;
-        width += 2; height += 2; x0 -= 1; y0 -= 1;
+        width += 2*pad; height += 2*pad; x0 -= pad; y0 -= pad;
         bitmap_bytes = adjusted_bytes;
         cache_reserve(bitmap_bytes + sizeof(*entry));
     }
@@ -2093,14 +2094,19 @@ void ttf_set_weight(int wght) {
 
 // Coverage adjustment also works for static TTF/CFF faces and embedded font slots.
 // No extra face or full-page buffer is loaded; the shared glyph cache remains bounded.
-void ttf_set_stroke_adjust(int level) {
-    if (level < -2) level = -2;
-    if (level > 2) level = 2;
-    if (s_stroke_adjust == level) return;
-    s_stroke_adjust = level;
-    cache_clear_all();
+void ttf_set_stroke_adjust_fine(int steps) {
+    if(steps < -32)steps=-32;
+    if(steps > 32)steps=32;
+    if(s_stroke_adjust==steps)return;
+    s_stroke_adjust=steps;cache_clear_all();
 }
-int ttf_get_stroke_adjust(void) { return s_stroke_adjust; }
+int ttf_get_stroke_adjust_fine(void) {return s_stroke_adjust;}
+void ttf_set_stroke_adjust(int level) {
+    if(level < -2)level=-2;
+    if(level > 2)level=2;
+    ttf_set_stroke_adjust_fine(level*16);
+}
+int ttf_get_stroke_adjust(void) {return s_stroke_adjust/16;}
 
 int ttf_get_weight(void) {
     return s_slots[TTF_FONT_SLOT_SYSTEM].f_weight;

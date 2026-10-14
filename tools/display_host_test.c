@@ -200,6 +200,14 @@ int main(void) {
     assert(update_display_water_turn(&hl, (EpdRect){0, 0, 16, 16}, E0470_TURN_RTL) == EPD_DRAW_SUCCESS);
     assert(water_calls == 2 && clears == 1 && white_baseline && correct_target_at_draw);
     assert(last_mode == MODE_GC16 && !memcmp(back, target, FB_BYTES));
+    memcpy(front,target,FB_BYTES);memset(back,0x55,FB_BYTES);draws=clears=full_draws=0;
+    assert(update_display_reader_cleanup(&hl,&E0470_WAVEFORM)==EPD_DRAW_SUCCESS);
+    assert(clears==1&&draws==1&&full_draws==1&&last_mode==MODE_GL16&&white_baseline&&correct_target_at_draw);
+    assert(!memcmp(front,target,FB_BYTES)&&!memcmp(back,target,FB_BYTES));
     assert(!ota_display_depth);
     puts("display underrun: front retained, white back baseline, full GC16 recovery and bulk prefill passed");
 }
+
+// Continuous state is exercised separately with native-size buffers.
+void continuous_du_reset(void){}
+bool continuous_du_busy(void){return false;}

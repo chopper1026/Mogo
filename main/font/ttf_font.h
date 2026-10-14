@@ -173,6 +173,9 @@ void ttf_set_weight(int wght);
 /// Reader stroke adjustment -2..2, zero preserves native rasterization.
 void ttf_set_stroke_adjust(int level);
 int ttf_get_stroke_adjust(void);
+/// 1/16像素笔画覆盖率微调，不改变字宽。/ Adjust stroke coverage in 1/16-pixel steps without changing advances.
+void ttf_set_stroke_adjust_fine(int steps);
+int ttf_get_stroke_adjust_fine(void);
 /// 绘制时使用灰阶覆盖或二值边缘，复用同一份字形缓存，不改变字宽。/ Select gray coverage or binary edges while drawing, reusing glyphs without changing advances.
 void ttf_set_antialias(bool enabled);
 bool ttf_get_antialias(void);

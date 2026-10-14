@@ -41,6 +41,7 @@ static bool alloc_fail;
 static const EpdRect acrylic[] = {{0,360,H,90},{0,642,H,90},{0,924,H,90}};
 static EpdRect last_area;
 static enum EpdDrawMode last_mode;
+static const EpdWaveform *last_wave;
 static char owner_a, owner_b;
 static enum EpdRotation rotation = EPD_ROT_INVERTED_PORTRAIT;
 static int nav_draws, water_calls, water_fails;
@@ -112,7 +113,7 @@ static enum EpdDrawError draw(EpdiyHighlevelState* state, enum EpdDrawMode mode,
     ++calls; full_calls += full;
     nav_draws += x1 > UI_NAV_REFRESH_END;
     last_area = area ? *area : (EpdRect){0, 0, H, W};
-    last_mode = mode;
+    last_mode = mode; last_wave=state->waveform;
     if (mode == MODE_DU) {
         ++bw_calls;
         if (state->waveform == &E0470_FOLLOW_WAVEFORM) assert(scan == READ_PICO_EPD_SCAN_FAST);
@@ -569,7 +570,35 @@ int main(void) {
     assert(water_calls==1 && gray_calls==1 && !bw_calls && !clears);
     reset();main_mode=APP_MAIN_REFRESH_WATER;gray_target(2);display_main_transition_arm(&owner_a,false,false);
     assert(update_display_fast_page(&hl)==EPD_DRAW_SUCCESS);assert_final();assert(!water_calls && gray_calls==1 && !bw_calls);
+    // 主循环给首页局部输出加入口许可，短时钟波形仍必须原样通过三种主页模式。
+    // Main-loop permission arms local Home output; short clock motion must retain its waveform in all main modes.
+    for(int mode=APP_MAIN_REFRESH_NORMAL;mode<=APP_MAIN_REFRESH_WATER;++mode){
+        reset();main_mode=mode;
+        memset(front,mode==APP_MAIN_REFRESH_FAST?0xff:0x73,BYTES);
+        assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);
+        calls=bw_calls=gray_calls=gc_calls=full_calls=clears=nav_draws=0;
+        for(int step=1;step<=6;++step){
+            front[200*(W/2)+700/2]=step%2?0x0f:0xf0;memcpy(final,front,BYTES);
+            display_main_transition_arm(&owner_a,false,false);
+            assert(update_display_area_diff_with(&hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,(EpdRect){0,640,H,256})==EPD_DRAW_SUCCESS);
+            assert(last_wave==&E0470_FOLLOW_WAVEFORM&&last_mode==MODE_DU&&scan==READ_PICO_EPD_SCAN_FAST);
+            assert(calls==step&&bw_calls==step&&!gray_calls&&!full_calls&&!clears&&!water_calls&&!nav_draws&&!allocations);
+            assert_final();
+        }
+        display_main_transition_arm(&owner_a,false,false);
+        assert(update_display_area_diff_with(&hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,(EpdRect){0,640,H,256})==EPD_DRAW_SUCCESS);
+        assert(calls==6);assert_final();
+        front[200*(W/2)+700/2]=0;memcpy(final,front,BYTES);failures=1;fail_error=EPD_DRAW_OTHER_ERROR;
+        display_main_transition_arm(&owner_a,false,false);
+        assert(update_display_area_diff_with(&hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,(EpdRect){0,640,H,256})==EPD_DRAW_SUCCESS);
+        assert(clears==1&&gc_calls==1);assert_final();
+    }
+    puts("PASS: protected Cat/Kehai short motion retains FOLLOW/DU/FAST in normal, fast and ripple; unchanged targets skip scans and failures rebuild the exact frame");
     assert(!ota_display_depth);
     puts("main navigation: 200 complete BW transitions; calibrated gray bands, empty shelf slots, identical-target skips, allocation failure and three output-failure recoveries; moving markers, nibble/32-column boundaries and default outputs passed");
     return 0;
 }
+
+// Continuous state is exercised separately with native-size buffers.
+void continuous_du_reset(void){}
+bool continuous_du_busy(void){return false;}

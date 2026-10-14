@@ -16,6 +16,8 @@
  * User revision: present feedback before starting online work; append black progress without erasing completed segments or counting page cleanup. Release off-screen cover caches before updating.
  * 用户确认：字号并入系统字体并预览；选择字体后询问同步阅读字体，设置按连接/显示/个性化/升级分组。
  * Approved revision: size and preview live with the UI face; ask before syncing the reading face, and group connection/display/personalization/maintenance.
+ * 用户修订：滑动时仅黑白，普通/水波纹停稳只补变化灰阶，快刷不补刷；主列表复用有界一位缓存。
+ * User revision: binary while moving; normal/water restore changed grays after idle, fast keeps binary. Reuse a bounded one-bit main-list cache.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +46,8 @@
 #include "ttf_font.h"
 #include "app_font_context.h"
 #include "ui_gesture.h"
+#include "ui_follow_scroll.h"
+#include "ui_follow_cache.h"
 #include "ui_kit.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
@@ -118,7 +122,15 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
 }
 static int s_style_scroll, s_main_scroll;
 static bool s_collage_prepare_pending;
-static bool s_scroll_drag_consumed, s_scroll_present_pending;
+static bool s_scroll_present_pending, s_scroll_follow_present, s_scroll_frame_changed;
+static bool s_scroll_settle_present;
+static ui_follow_scroll_t s_follow_scroll;
+static uint8_t *s_scroll_cache;
+static unsigned s_scroll_cache_step;
+static void settings_scroll_cache_release(void);
+static bool settings_scroll_cache_prepare(app_ctx_t *ctx);
+static app_redraw_t settings_scroll_feed(app_ctx_t *ctx, bool *handled);
+static bool settings_scroll_page(void);
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
 // Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
 // and a notice line.
@@ -1364,6 +1376,46 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     ui_nav_draw(fb, 3);
 }
 
+// 主列表 1761px 内容压成一位约151KB，空闲时分两段准备；临时工作帧立即释放。
+// Pack the 1761px main content into about 151KB; prepare two idle slices and release the scratch frame immediately.
+static void settings_scroll_cache_release(void) {
+    free(s_scroll_cache); s_scroll_cache = NULL; s_scroll_cache_step = 0;
+}
+static bool settings_scroll_cache_prepare(app_ctx_t *ctx) {
+    if (s_page != SETTINGS_MAIN || s_scroll_cache_step >= 2 || s_avatar_pending ||
+        s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting || s_follow_scroll.settle_pending ||
+        ctx->consumed || (ctx->touch && ctx->touch->touched) || display_follow_busy()) return false;
+    if (epd_width() != 1216 || epd_height() != 684 || epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT) {
+        s_scroll_cache_step = 3; return false;
+    }
+    const int extent = UI_NAV_TOP - 160 + SETTINGS_SCROLL_MAX;
+    const size_t bytes = (size_t)684 * ((extent + 7) / 8), frame_bytes = (size_t)1216 * 684 / 2;
+    const uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    if (!s_scroll_cache) {
+        if (heap_caps_get_free_size(caps) < bytes + frame_bytes + 1024u * 1024u) {
+            s_scroll_cache_step = 3; return false;
+        }
+        s_scroll_cache = heap_caps_calloc(bytes, 1, caps);
+        if (!s_scroll_cache) { s_scroll_cache_step = 3; return false; }
+    }
+    const int offset = s_scroll_cache_step ? SETTINGS_SCROLL_MAX : 0;
+    uint8_t *scratch = NULL;
+    const uint8_t *pixels = ctx->fb;
+    if (offset != s_main_scroll) {
+        if (heap_caps_get_free_size(caps) < frame_bytes + 1024u * 1024u ||
+            !(scratch = heap_caps_malloc(frame_bytes, caps))) {
+            settings_scroll_cache_release(); s_scroll_cache_step = 3; return false;
+        }
+        int saved = s_main_scroll; s_main_scroll = offset;
+        render(ctx, scratch); s_main_scroll = saved; pixels = scratch;
+    }
+    bool captured = ui_follow_cache_capture(s_scroll_cache, pixels, 1216, 684, 160, UI_NAV_TOP, extent, offset);
+    free(scratch);
+    if (captured) ++s_scroll_cache_step;
+    else { settings_scroll_cache_release(); s_scroll_cache_step = 3; }
+    return true;
+}
+
 static void settings_prepare_profile(void) {
     const char *path=app_settings_avatar_path();
     struct stat st={0};
@@ -1372,17 +1424,20 @@ static void settings_prepare_profile(void) {
     if (!strcmp(path,s_avatar_path) && st.st_mtime==s_avatar_mtime && st.st_size==s_avatar_size) return;
     snprintf(s_avatar_path,sizeof(s_avatar_path),"%s",path);
     s_avatar_mtime=st.st_mtime; s_avatar_size=st.st_size;
-    s_avatar_ready=false; s_avatar_pending=true;
+    s_avatar_ready=ui_wallpaper_avatar_cached(path,s_avatar_pixels,82); s_avatar_pending=!s_avatar_ready;
 }
 static void on_enter(app_ctx_t *ctx) {
     (void)ctx;
     pin_setup_close();
+    settings_scroll_cache_release();
     s_notice[0] = 0;
     s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
     s_collage_prepare_pending = false;
-    s_scroll_drag_consumed = s_scroll_present_pending = false;
+    ui_follow_scroll_reset(&s_follow_scroll);
+    s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = false;
+    s_scroll_settle_present = false;
     s_wallpaper_selected = -1;
     s_wallpaper_confirm = s_wallpaper_preview_ok = false;
     s_sync_pending = false;
@@ -1426,8 +1481,37 @@ static bool ble_receive_feedback(void) {
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
 static app_redraw_t on_tick(app_ctx_t *ctx) {
+    if (settings_scroll_page()) {
+        if (ctx->consumed) return APP_REDRAW_NONE;
+        if (s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting) {
+            bool handled;
+            app_redraw_t redraw = settings_scroll_feed(ctx, &handled);
+            if (redraw != APP_REDRAW_NONE) return redraw;
+            // 拖动时异步头像/蓝牙变化不得插入慢刷。/ Keep asynchronous avatar/BLE changes from inserting slow updates during contact.
+            if (display_follow_busy() && ctx->continuous_ready) {
+                s_scroll_present_pending = s_scroll_follow_present = true;
+                return APP_REDRAW_AREA;
+            }
+            if (s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting) return APP_REDRAW_NONE;
+        }
+        if (ctx->continuous_ready && display_follow_busy()) {
+            s_scroll_present_pending = s_scroll_follow_present = true;
+            return APP_REDRAW_AREA;
+        }
+        if (ui_follow_scroll_take_settle(&s_follow_scroll, ctx)) {
+            s_scroll_present_pending = true;
+            s_scroll_follow_present = false;
+            s_scroll_settle_present = true;
+            return APP_REDRAW_AREA;
+        }
+        // 下一次触摸可继续替换目标，灰阶与异步资料卡不能抢占待完成的滚动。
+        // New input may replace the target; neither gray restoration nor async profile work may interrupt it.
+        if (s_follow_scroll.settle_pending) return APP_REDRAW_NONE;
+    }
+
     if (s_page==SETTINGS_MAIN && s_avatar_pending && !(ctx->touch && ctx->touch->touched)) {
         s_avatar_pending=false;
+        settings_scroll_cache_release();
         s_avatar_ready=ui_wallpaper_prepare_avatar(s_avatar_path,s_avatar_pixels,82);
         if (s_avatar_ready && s_main_scroll < 180+settings_profile_height()-160) {
             render(ctx,ctx->fb);
@@ -1437,6 +1521,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             return APP_REDRAW_DONE;
         }
     }
+    if (settings_scroll_cache_prepare(ctx)) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_PIN_ENTRY) return pin_setup_tick(ctx);
     if (s_collage_prepare_pending && s_page == SETTINGS_LOCK_STYLE) {
         s_collage_prepare_pending = false;
@@ -1597,39 +1682,26 @@ save_text:
     return APP_REDRAW_PAGE;
 }
 
-// 手指越过阈值就推进至少三行；一轮拖动只刷新一次，松手不再重复滚动。
-// Advance at least three rows on crossing the drag threshold; refresh once per drag, without repeating on release.
-static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, int limit, bool *handled) {
-    *handled = ev->type != UI_GESTURE_TAP || s_scroll_drag_consumed;
-    if (ev->type == UI_GESTURE_PRESS) {
-        s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
+// 手指直接跟随；松手按最近速度有界减速，新触摸立即停止。/ Follow directly; decelerate from recent velocity after lift, stopping on new contact.
+static bool settings_scroll_page(void) {
+    return s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN;
+}
+
+static app_redraw_t settings_scroll_feed(app_ctx_t *ctx, bool *handled) {
+    int limit = SETTINGS_SCROLL_MAX;
+    int *offset = &s_main_scroll;
+    if (s_page != SETTINGS_MAIN) {
+        int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
+        limit = bottom - UI_NAV_TOP + 12;
+        offset = &s_ble_scroll;
     }
-    if (ev->type == UI_GESTURE_TAP || ev->type == UI_GESTURE_CANCEL) {
-        s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
-    }
-    if (ev->type != UI_GESTURE_MOVE && ev->type != UI_GESTURE_SWIPE_U && ev->type != UI_GESTURE_SWIPE_D)
-        return APP_REDRAW_NONE;
-    if (ev->y0 < (s_page == SETTINGS_MAIN ? 160 : 190) || ev->y0 >= UI_NAV_TOP)
-        return APP_REDRAW_NONE;
-    if (s_scroll_drag_consumed) {
-        if (ev->type != UI_GESTURE_MOVE) s_scroll_drag_consumed = false;
-        return APP_REDRAW_NONE;
-    }
-    int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
-    int distance = abs(dy);
-    if (ev->type == UI_GESTURE_MOVE && (distance < 108 || distance <= abs(dx))) return APP_REDRAW_NONE;
-    int step = distance < 204 ? 204 : distance > 450 ? 450 : distance;
-    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
-    int next = *offset + (up ? step : -step);
-    if (limit < 0) limit = 0;
-    if (next < 0) next = 0;
-    if (next > limit) next = limit;
-    if (ev->type == UI_GESTURE_MOVE) s_scroll_drag_consumed = true;
-    if (next == *offset) return APP_REDRAW_NONE;
-    *offset = next;
-    s_scroll_present_pending = true;
+    bool changed = ui_follow_scroll_feed(&s_follow_scroll, ctx, s_page == SETTINGS_MAIN ? 160 : 190,
+        UI_NAV_TOP, offset, limit, handled);
+    if (s_follow_scroll.settle_pending && !s_follow_scroll.tracking && !s_follow_scroll.coasting && app_settings_main_fast_refresh())
+        s_follow_scroll.settle_ms = ctx->now_ms;
+    if (!changed) return APP_REDRAW_NONE;
+    s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = true;
+    s_scroll_settle_present = false;
     return APP_REDRAW_AREA;
 }
 
@@ -1720,18 +1792,16 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
-    if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {
-        int limit = SETTINGS_SCROLL_MAX;
-        int *offset = &s_main_scroll;
-        if (s_page != SETTINGS_MAIN) {
-            int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
-            limit = bottom - UI_NAV_TOP + 12;
-            offset = &s_ble_scroll;
+    if (settings_scroll_page()) {
+        if (ev->type == UI_GESTURE_CANCEL) {
+            ui_follow_scroll_cancel(&s_follow_scroll, ctx->now_ms);
+            return APP_REDRAW_NONE;
         }
         bool handled;
-        app_redraw_t redraw = scroll_gesture(ev, offset, limit, &handled);
-        if (handled) return redraw;
+        app_redraw_t redraw = settings_scroll_feed(ctx, &handled);
+        if (handled || redraw != APP_REDRAW_NONE) return redraw;
     }
+
     if (s_page == SETTINGS_AVATAR && (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         int pages = (s_wallpaper_count + 6) / 7;
         int old = s_wallpaper_page;
@@ -2187,6 +2257,8 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 static void settings_exit(app_ctx_t *ctx) {
+    settings_scroll_cache_release();
+    ui_follow_scroll_reset(&s_follow_scroll);
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
     s_collage_prepare_pending = false;
@@ -2194,6 +2266,8 @@ static void settings_exit(app_ctx_t *ctx) {
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
 }
 static void on_before_lock(app_ctx_t *ctx) {
+    settings_scroll_cache_release();
+    ui_follow_scroll_reset(&s_follow_scroll);
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
     s_upgrade_job = UPGRADE_JOB_NONE;
@@ -2202,11 +2276,20 @@ static void on_before_lock(app_ctx_t *ctx) {
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
+    settings_scroll_cache_release();
+    ui_follow_scroll_reset(&s_follow_scroll);
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
-static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_prepare_profile(); }
+static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_scroll_cache_release(); settings_prepare_profile(); }
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
+    if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) {
+        settings_scroll_cache_release();
+        ui_follow_scroll_reset(&s_follow_scroll);
+        s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = false;
+        s_scroll_settle_present = false;
+    }
+
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
         display_main_transition_cancel(); render(ctx, ctx->fb);
         guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, ui_pinpad_full()));
@@ -2228,12 +2311,25 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
          s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
          s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_AVATAR)) {
         s_scroll_present_pending = false;
-        render(ctx, ctx->fb);
+        bool restore_gray = !s_scroll_settle_present || !app_settings_main_fast_refresh();
+        if (s_scroll_follow_present && s_scroll_frame_changed) {
+            bool cached = s_page == SETTINGS_MAIN && s_scroll_cache_step == 2 &&
+                ui_follow_cache_blit(s_scroll_cache, ctx->fb, 1216, 684, 160, UI_NAV_TOP,
+                                    UI_NAV_TOP - 160 + SETTINGS_SCROLL_MAX, s_main_scroll);
+            if (!cached) render(ctx, ctx->fb);
+        } else if (!s_scroll_follow_present && restore_gray) render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
         EpdRect area = {0, top, UI_LOCK_WIDTH, UI_NAV_TOP - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
-        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, area));
+        enum EpdDrawError result = s_scroll_follow_present
+            ? display_follow_area(ctx->hl, area, s_scroll_frame_changed, ctx->continuous_ready)
+            : display_follow_settle(ctx->hl, area, restore_gray);
+        s_scroll_frame_changed = false;
+        s_scroll_settle_present = false;
+        guard_draw_result(ctx->hl, result);
+        if (result != EPD_DRAW_SUCCESS) ui_follow_scroll_cancel(&s_follow_scroll, ctx->now_ms);
+        s_scroll_follow_present = false;
         return true;
     }
     if (s_page != SETTINGS_UPGRADE) return false;

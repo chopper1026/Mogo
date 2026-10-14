@@ -40,6 +40,19 @@ typedef struct {
     uint32_t day[30];
     uint32_t seconds[30];
 } ticket_heat_t;
+#define TICKET_MONTH_MAGIC UINT32_C(0x52504832)
+typedef struct { uint32_t magic, day[32], seconds[32]; } ticket_month_t;
+static void month_load(nvs_handle_t h, ticket_month_t *out) {
+    size_t len = sizeof(*out);
+    if (nvs_get_blob(h, "heat32", out, &len) == ESP_OK && len == sizeof(*out) && out->magic == TICKET_MONTH_MAGIC) return;
+    memset(out, 0, sizeof(*out)); out->magic = TICKET_MONTH_MAGIC;
+    ticket_heat_t old = {0}; len = sizeof(old);
+    if (nvs_get_blob(h, "heatmap", &old, &len) != ESP_OK || len != sizeof(old) || old.magic != TICKET_HEAT_MAGIC) return;
+    for (unsigned i = 0; i < 30; ++i) if (old.day[i] && old.day[i] % 30 == i) {
+        unsigned slot = old.day[i] % 32;
+        if (out->day[slot] < old.day[i]) { out->day[slot] = old.day[i]; out->seconds[slot] = old.seconds[i]; }
+    }
+}
 static uint32_t local_day(void) {
     time_t now = time(NULL);
     if (now < 1704067200) {
@@ -72,6 +85,13 @@ esp_err_t book_ticket_record(uint32_t seconds, uint32_t turns) {
     if (err != ESP_OK) return err;
     err = nvs_set_blob(h, "stats", &stats, sizeof(stats));
     if (err == ESP_OK && day && seconds) {
+        // 先迁移旧环，再同时维护两个环，保留降级兼容。/ Migrate before updating both rings, preserving downgrade compatibility.
+        ticket_month_t month; month_load(h, &month);
+        unsigned mslot = day % 32;
+        if (month.day[mslot] != day) { month.day[mslot] = day; month.seconds[mslot] = 0; }
+        uint32_t previous = month.seconds[mslot];
+        month.seconds[mslot] = UINT32_MAX - previous < seconds ? UINT32_MAX : previous + seconds;
+        err = nvs_set_blob(h, "heat32", &month, sizeof(month));
         ticket_heat_t heat = {0};
         size_t len = sizeof(heat);
         if (nvs_get_blob(h, "heatmap", &heat, &len) != ESP_OK ||
@@ -83,7 +103,7 @@ esp_err_t book_ticket_record(uint32_t seconds, uint32_t turns) {
         if (heat.day[slot] != day) { heat.day[slot] = day; heat.seconds[slot] = 0; }
         uint32_t old = heat.seconds[slot];
         heat.seconds[slot] = UINT32_MAX - old < seconds ? UINT32_MAX : old + seconds;
-        err = nvs_set_blob(h, "heatmap", &heat, sizeof(heat));
+        if (err == ESP_OK) err = nvs_set_blob(h, "heatmap", &heat, sizeof(heat));
     }
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
@@ -105,6 +125,24 @@ bool book_ticket_recent_days(uint32_t seconds[30]) {
         uint32_t day = today - (29 - i);
         unsigned slot = day % 30;
         if (heat.day[slot] == day) seconds[i] = heat.seconds[slot];
+    }
+    return true;
+}
+bool book_ticket_month_days(int year, int month, uint32_t seconds[31]) {
+    if (!seconds) return false;
+    memset(seconds, 0, 31*sizeof(*seconds));
+    uint32_t today = local_day();
+    if (!today || year < 2024 || year > 9999 || month < 1 || month > 12) return false;
+    time_t timestamp = (time_t)today * 86400;
+    struct tm date = {0}; gmtime_r(&timestamp, &date);
+    if (date.tm_year+1900 != year || date.tm_mon+1 != month) return false;
+    nvs_handle_t h;
+    if (nvs_open("rp_ticket", NVS_READONLY, &h) != ESP_OK) return true;
+    ticket_month_t heat; month_load(h, &heat); nvs_close(h);
+    uint32_t first = today-(date.tm_mday-1);
+    for (int i=0; i<date.tm_mday; ++i) {
+        uint32_t day=first+i; unsigned slot=day%32;
+        if (heat.day[slot]==day) seconds[i]=heat.seconds[slot];
     }
     return true;
 }
@@ -218,6 +256,13 @@ static void ticket_stat(uint8_t *fb, int y, int height, int px, const char *text
         ui_text_fixed(fb, 82, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
     }
 }
+static void ticket_heading(uint8_t *fb,int top,int height,int px,char *text) {
+    // 锁屏入口已切系统字体；标题按原生轮廓输出，独立强制AA，测量与绘制用同一字库。
+    // Lock entry selects the system face; rasterize native outlines with explicit AA and measure using the same face.
+    px=ui_text_effective_px(px);if(px>height-2)px=height-2;
+    px=ui_text_title_fit(text,px,520,text);
+    ui_text_title_vc(fb,82,top+height/2,px,text,text,EPD_DRAW_ALIGN_LEFT);
+}
 bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     (void)reader_background;
     char path[288];
@@ -242,9 +287,8 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     ticket_paper_draw(fb);
     ui_text(fb, 82, 98, 28, "kiikoread  /  阅读票根", EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 156, 82, 520, UI_GRAY_BLACK);
-    text_fit(title, 50, 520);
-    ui_text(fb, 82, 202, 50, title, EPD_DRAW_ALIGN_LEFT, false);
-    if (author[0]) { text_fit(author, 28, 520); ui_text(fb, 82, 274, 28, author, EPD_DRAW_ALIGN_LEFT, false); }
+    ticket_heading(fb,202,64,50,title);
+    if (author[0]) ticket_heading(fb,274,44,28,author);
     cover_draw(fb, gray, title);
     free(gray);
     ui_hairline(fb, 768, 82, 520, UI_GRAY_BLACK);

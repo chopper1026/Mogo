@@ -145,11 +145,15 @@ void ui_text_fixed_vc(
 /// 固定字号文字使用指定灰阶墨色，复用活动字体。/ Fixed-size text with a chosen gray ink, reusing the active face.
 void ui_text_fixed_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                           enum EpdFontFlags align, uint8_t gray);
+/// 原字号灰阶抗锯齿，边缘混合到实际底色；暂时启用后恢复正文开关，不加载另一份字体。
+/// Native-size gray antialiasing against the actual background; restore the body switch afterward and never load another face.
+void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const char *text,
+                               const char *font_sample,enum EpdFontFlags align,uint8_t gray,uint8_t background);
 /// 标题复用当前活动字体并按固定字号截短：首页系统字体、阅读页阅读字体；不加载第二份字体。
 /// Fit titles in the active face at a fixed size: Home's system face or the reader face, without loading a second font.
 int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample);
-/// 当前页字体按目标字号直接绘制黑色标题，视觉中心对齐，不受系统字号缩放影响。
-/// Rasterize the active face directly at the target size in black, visually centered and independent of UI scaling.
+/// 当前页字体按目标字号直接绘制灰阶抗锯齿标题，视觉中心对齐，不受系统字号缩放影响。
+/// Rasterize the active face directly with gray antialiasing at the target size, visually centered and independent of UI scaling.
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                       const char *font_sample, enum EpdFontFlags align);
 void ui_text_bw(

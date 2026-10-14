@@ -23,8 +23,9 @@ static char s_rejected[TTF_FONT_PATH_MAX],corrupt[288];
 static time_t s_rejected_mtime;
 static off_t s_rejected_size;
 static int stroke,reading_weight=2;
-static int app_settings_book_weight(void){return reading_weight;}
-static void ttf_set_stroke_adjust(int level){stroke=level;}
+static int app_settings_book_weight_fine(void){return reading_weight;}
+static void ttf_set_stroke_adjust_fine(int level){stroke=level;}
+static void ttf_set_stroke_adjust(int level){stroke=level*16;}
 static bool reading_aa=false,aa=true;
 static bool app_settings_book_antialias(void){return reading_aa;}
 static void ttf_set_antialias(bool enabled){aa=enabled;}

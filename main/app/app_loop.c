@@ -429,7 +429,7 @@ void app_loop_run(const app_loop_config_t* config) {
     ui_quick_menu_reset(&s_quick);
     bool menu_open = false;
     ui_gesture_t gesture = {0};
-    ui_gesture_t power_gesture = {0};
+    ui_power_dialog_t power_dialog = {0};
     bool power_dialog_open = false;
     int menu_pressed = UI_MENU_HIT_NONE;
     menu_feedback_t feedback = {0};
@@ -504,6 +504,8 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
             if (poll_media(&ctx, current, &media_mounted, &media_invalidated)) {
+                power_dialog_open = false;
+                ui_power_dialog_reset(&power_dialog, touch.touched);
                 ui_quick_menu_reset(&s_quick);
                 held_key = -1;
                 cancel_gesture(&ctx, current, &gesture);
@@ -545,24 +547,34 @@ void app_loop_run(const app_loop_config_t* config) {
         }
 
         if (power_input_owned && err == ESP_OK) {
-            ui_gesture_event_t event;
             ctx.consumed = false;
-            if (ui_gesture_feed(&power_gesture, &ctx, &event)) {
-                ui_power_action_t action = ui_power_dialog_handle(&event);
+            EpdRect dirty;
+            ui_power_action_t action = ui_power_dialog_feed(&power_dialog, &ctx, &dirty);
+            if (action == UI_POWER_ACTION_NONE && dirty.height > 0) {
+                ui_power_dialog_draw_controls(ctx.fb, &power_dialog);
+                enum EpdDrawError result = update_display_area_diff_with(
+                    ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty);
+                guard_draw_result(ctx.hl, result);
+                if (result != EPD_DRAW_SUCCESS) {
+                    power_dialog_open = false;
+                    ui_power_dialog_reset(&power_dialog, touch.touched);
+                    app_present(&ctx, current, APP_REDRAW_FULL);
+                }
+            } else {
                 if (action == UI_POWER_ACTION_CANCEL) {
                     power_dialog_open = false;
-                    ui_gesture_reset(&power_gesture);
+                    ui_power_dialog_reset(&power_dialog, false);
                     if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
                 } else if (action == UI_POWER_ACTION_SHUTDOWN) {
                     app_shutdown_style_t style = app_settings_shutdown_style();
                     if (style == APP_SHUTDOWN_FULL) {
                         power_dialog_open = false;
-                        ui_gesture_reset(&power_gesture);
+                        ui_power_dialog_reset(&power_dialog, false);
                         run_power_action(&ctx, current, false);
                     } else {
                         power_dialog_open = false;
-                        ui_gesture_reset(&power_gesture);
+                        ui_power_dialog_reset(&power_dialog, false);
                         prepare_lock(&ctx, current, true);
                         extern const app_desc_t app_book;
                         main_lock_boundary();
@@ -571,6 +583,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                              current == &app_book && app_book_reader_body_visible(),
                                              style == APP_SHUTDOWN_LIGHT);
+                        display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -580,6 +593,8 @@ void app_loop_run(const app_loop_config_t* config) {
                         app_present(&ctx, current, APP_REDRAW_PAGE);
                     }
                 } else if (action == UI_POWER_ACTION_RESTART) {
+                    power_dialog_open = false;
+                    ui_power_dialog_reset(&power_dialog, false);
                     run_power_action(&ctx, current, true);
                 }
             }
@@ -589,7 +604,13 @@ void app_loop_run(const app_loop_config_t* config) {
         if (err != ESP_OK) {
             held_key = -1;
             cancel_gesture(&ctx, current, &gesture);
-            ui_gesture_reset(&power_gesture);
+            EpdRect dirty;
+            ui_power_dialog_cancel_input(&power_dialog, &dirty);
+            if (power_dialog_open && dirty.height > 0) {
+                ui_power_dialog_draw_controls(ctx.fb, &power_dialog);
+                guard_draw_result(ctx.hl, update_display_area_diff_with(
+                    ctx.hl, &E0470_FOLLOW_WAVEFORM, MODE_DU, dirty));
+            }
             ctx.consumed = true;
             if (menu_pressed >= 0) menu_feedback(&ctx, current, menu_leaf, menu_pressed, false, &feedback);
             menu_pressed = UI_MENU_HIT_NONE;
@@ -724,6 +745,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         prepare_lock(&ctx, current, true);
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp, true, false);
+                        display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -734,10 +756,20 @@ void app_loop_run(const app_loop_config_t* config) {
                         app_present(&ctx, current, APP_REDRAW_PAGE);
                     } else {
                         power_dialog_open = true;
-                        ui_gesture_reset(&power_gesture);
-                        ui_power_dialog_draw(ctx.fb);
-                        guard_draw_result(ctx.hl, update_display_area_with(
-                            ctx.hl, &E0470_WAVEFORM, MODE_GL16, ui_power_dialog_rect()));
+                        ui_power_dialog_reset(&power_dialog, touch.touched);
+                        ctx.request_app = NULL;
+                        ctx.request_return = ctx.request_menu = false;
+                        main_lock_boundary();
+                        ui_text_set_system_scale(true);
+                        ui_power_dialog_draw(ctx.fb, &power_dialog);
+                        enum EpdDrawError result = update_display_area_with(
+                            ctx.hl, &E0470_WAVEFORM, MODE_GL16, ui_power_dialog_rect());
+                        guard_draw_result(ctx.hl, result);
+                        if (result != EPD_DRAW_SUCCESS) {
+                            power_dialog_open = false;
+                            ui_power_dialog_reset(&power_dialog, touch.touched);
+                            app_present(&ctx, current, APP_REDRAW_FULL);
+                        }
                     }
                 } else if (!power_dialog_open) {
                     held_key = -1;
@@ -755,6 +787,7 @@ void app_loop_run(const app_loop_config_t* config) {
                         main_lock_boundary();
                         enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                              !menu_open && current == &app_book && app_book_reader_body_visible(), false);
+                        display_request_full_refresh();
                         ctx.now_ms = esp_timer_get_time() / 1000;
                         last_input_ms = ctx.now_ms;
                         poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -861,6 +894,7 @@ void app_loop_run(const app_loop_config_t* config) {
             main_lock_boundary();
             enter_lock_and_sleep(ctx.hl, &s_lock_ignore_until_ms, ctx.acc, ctx.tp,
                                  !menu_open && current == &app_book && app_book_reader_body_visible(), false);
+            display_request_full_refresh();
             ctx.now_ms = esp_timer_get_time() / 1000;
             last_input_ms = ctx.now_ms;
             poll_media(&ctx, current, &media_mounted, &media_invalidated);
@@ -935,6 +969,8 @@ void app_loop_run(const app_loop_config_t* config) {
                 present_menu(&ctx, current, menu_leaf, &feedback);
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
+        // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
+        // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
+        vTaskDelay(pdMS_TO_TICKS(!menu_open&&!power_dialog_open&&display_follow_busy()?1:LOOP_TICK_MS));
     }
 }

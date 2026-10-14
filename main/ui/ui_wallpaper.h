@@ -13,9 +13,12 @@ bool ui_wallpaper_draw(uint8_t *framebuffer, const char *path, EpdRect area);
 /// Center-crop into a rounded area for the settings avatar.
 bool ui_wallpaper_draw_rounded(uint8_t *framebuffer, const char *path, EpdRect area, int radius);
 
-/// 只读准备 <=128px 的正方形头像；返回的灰阶像素由调用者保存，绘制无 IO。
-/// Prepare <=128px square avatar pixels; the caller owns storage, and painting performs no IO.
+/// 优先读TF成品头像；首次裁切后落卡，绘制无IO且不保留原图。
+/// Prefer the processed SD avatar, saving the first crop; painting has no IO or retained source image.
 bool ui_wallpaper_prepare_avatar(const char *path, uint8_t *pixels, int side);
+/// 只读成品缓存，未命中不解码；供首帧前快速恢复头像。
+/// Load only a processed cache without decoding on misses, for fast avatar restoration before the first frame.
+bool ui_wallpaper_avatar_cached(const char *path,uint8_t *pixels,int side);
 void ui_wallpaper_draw_avatar(uint8_t *framebuffer, const uint8_t *pixels, EpdRect area, int radius);
 
 /// 锁屏专用TF成品缓存，源文件/尺寸/方向/算法版本变化或缓存损坏时重建。

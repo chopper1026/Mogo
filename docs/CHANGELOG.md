@@ -3,19 +3,24 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 未发布 / Unreleased
+## 0.3.3-rc92 / 2026-10-14
 
-- 蓝牙翻页器修好一条完整链路：HID 报告映射（0x2A4B）以前读出来却没被用上，按键落在报告的哪个字节全靠猜；订阅输入报告时又一次性并发发出多个 CCCD 写，撞上协议栈很小的 ATT 处理池（proc alloc failed）之后状态不一致，直接断言重启；照抄来的那组连接参数会被控制器以 HCI 0x12 拒绝，部分设备因此根本连不上；报告在被按住期间还会被逐帧当成新按下，一按就疯狂翻页。现在按 CrossMux 的次序建立链路（连接 → 确认有 HID → 配对 → 订阅），订阅串行进行，报告路径去抖、按下状态带超时，翻页器连得上也按得动。另外新增崩溃日志：建立链路与按键的关键步骤留在 RTC 里，崩溃后重启，首页「上次运行」区直接列出崩溃前的经过，并带上异常类型与触发地址。
-  The Bluetooth page-turner now walks a whole link: the HID Report Map (0x2A4B) was read but never used, so which byte carried a key was pure guesswork; subscribing to input reports fired several CCCD writes at once, and running into the stack's small ATT procedure pool (proc alloc failed) left it inconsistent and asserted into a restart; a copied set of connection parameters was refused by the controller with HCI 0x12, so some remotes could not connect at all; and a held key looked like a fresh press on every report frame, turning pages frantically. The bring-up now follows CrossMux's order (connect, confirm HID, pair, subscribe) with serialised subscription, a debounced report path and a held-key timeout, so the remote both connects and turns pages. A crash log comes with it: bring-up and key steps are kept in RTC, and the next boot lists the run-up to the crash, along with the exception type and faulting address, in the home screen's last-run block.
-
-- 蓝牙翻页器学按键改为记下按下时外设发来的整帧字节：同一个键每次按下的字节一模一样，所以这一串就是它独有的标识，学习时记下它、使用时逐字节比对，不必再猜哪个字节是键码。第一次按下就能学会——以前要等一条「松开」报告，首次按下和从不发松开报告的遥控器永远学不到；点「学习」时把当时那一帧钉成基准，静止帧里带非零常量的遥控器不会再被学成那串常量；静默 150ms 后同一个键再按一次仍算一次新的按下。按键名一列显示这帧里非零的字节，例如 `06 B1`，同一个键每次都一样。
-  Learning a key now records the whole report frame the remote sends while it is held: the same key sends the same bytes every press, so that string is its own identifier, recorded when learning and compared byte for byte afterwards, with no guessing which byte holds the code. The first press already learns -- it used to need a release report, so a first press and a remote that never sends one could never be learned; tapping 学习 pins the frame present then as the baseline, so a remote whose resting frame carries non-zero constants no longer gets those constants learned instead of the key; and 150 ms of silence makes the next press of the same key count again. The key row shows that frame's non-zero bytes, such as `06 B1`, identical on every press of that key.
-
-- 阅读设置新增「竖排（从右到左）」开关，默认关闭，面向中国台湾与日本的竖排书：正文自上而下成列、列序自右向左，章节题头也竖排（右列编号、左列章名，正文列按同一宽度让开），段首缩进变成列顶留白，。、，等标点抬到字格右上角，拉丁字母、数字、括号与破折号顺时针转 90°，句读禁则按列首列尾处理；「边距」滑杆改为控制上下两端，轻点、横向滑动与晃动翻页的方向一起镜像（左半边、左滑、左晃都是下一页），插图独占一页。关掉开关回到原来的横排，排版与绘制一字未变。
-  The reading settings gain a “vertical (right to left)” switch, off by default, for the vertical books of Taiwan and Japan: body text runs down in columns ordered right to left, chapter headings are vertical too (the number column on the right, the title on the left, with body columns stepping aside by the same width), the paragraph indent becomes space at the top of a column, the period and comma lift into the cell's top-right corner, Latin letters, digits, brackets and dashes turn 90° clockwise, and the kinsoku rules apply to the top and bottom of a column. The margin slider now drives the top and bottom edges, taps, horizontal swipes and shakes all mirror (the left half, a left swipe and a left flick all advance), and an illustration takes a page of its own. Turning it off restores the original horizontal setting, unchanged.
-
-- 设置与锁屏的图标统一到图标库：「锁屏密码」以前复用「锁屏样式」的票根，现在是一把锁；输入密码界面上方那枚手绘的锁也换成同一枚图标；「自动休眠锁屏」的秒表换成闭眼。图标仍全部由 tools/icons/lucide 下的 SVG 生成。
-  Settings and lock-screen icons now come from the icon set: the lock-screen password row no longer borrows the lock style's ticket but gets a lock, the hand-drawn lock above the PIN entry becomes the same icon, and auto sleep shows a closed eye instead of a stopwatch. Every icon is still generated from the SVGs under tools/icons/lucide.
+- 首页新增 Moon、Kehai、Cat、Dali、Asterisk、小屋时钟与最近阅读书夹，保留 IKEA PS1995；长按选择样式，单击打开对应时间页或书架。阅读记录新增月历、每日目标与“已闭环”。
+  Add selectable clocks and the recent-reading folder, matching time pages, monthly records and daily goals.
+- 猫眼与 Kehai 秒针在普通、快刷、水波纹模式使用短局部刷新；Kehai 保留一圈浅色轨迹，避免动态区域被主页水波纹改写为较重刷新。修复书夹预览、边线与返回键反馈。
+  Preserve short local clock motion in all main modes, a bounded Kehai trail and exact feedback borders.
+- `books` 下的子目录可作为书架分类，从书架题头下拉选择；切页往返保留分类与当前页。书架布局位置及封面显示同步调整。
+  Select shelf categories from books subdirectories and retain category/page positions across navigation.
+- 设置列表使用跟手黑白滚动并加入可打断的减速惯性；普通与水波纹停止后补回灰阶，快刷保持黑白。滚动复用有界缓存，低内存回退原绘制。
+  Add interruptible inertial settings scrolling with bounded binary caches and gray settling where needed.
+- 阅读字重改为胶囊减/加，每次微调 1/16 像素覆盖率，旧配置保留实际粗细；自动全刷后的纯文字沿普通文字成像路径，减轻第一页偏淡。
+  Refine weight by 1/16-pixel coverage steps, preserve legacy thickness and align automatic text cleanup with ordinary text formation.
+- 合入 PR #27、#28、#31 原实现：竖排阅读、翻页器完整报告帧学习与连接订阅修复、RTC 崩溃记录及锁屏图标统一。
+  Include the original PR #27/#28/#31 implementations for vertical reading, Bluetooth reports/link reliability, crash records and lock icons.
+- 关机菜单采用滑动确认与圆形重启/取消；头像成品缓存到 TF 卡，票根使用系统字体与抗锯齿，首页边线及标题可读性优化。
+  Add slide-to-off, round restart/cancel controls, cached avatars and clearer system-font ticket/Home rendering.
+- 官网刷机、TF、联网 OTA 与 GitHub Release 来自同一次产品构建，保留历史固定下载地址。
+  Publish one product build for USB, TF, OTA and GitHub Releases while retaining immutable older downloads.
 
 - 设置的「关机睡眠」在「彻底关机」「先浅睡，10 分钟后深睡」之外新增「仅浅睡」：电源菜单点「关机」后锁屏浅睡、永不断电，短按电源键或拿起设备直接回到关机前的页面，锁屏画面保留（整夜待机耗电高于深睡档，属预期取舍）。旧设置值不受影响；设置备份恢复时「仅浅睡」降级为先浅后深。
   Settings › Power & sleep gains a third option “仅浅睡” (light-only) next to full shutdown and the staged ten-minute ladder: the power menu's shutdown now locks the screen into a deadline-free light sleep that never powers off, and a short press or pickup returns to the pre-shutdown page with the lock image retained (overnight idle power is higher than deep sleep, an intentional trade-off). Existing settings values are unaffected; settings backups restore light-only as the staged ladder.

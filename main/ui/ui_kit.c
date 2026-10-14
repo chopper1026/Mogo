@@ -329,6 +329,22 @@ static bool title_uses_active_font(const char *sample) {
     return ttf_font_ready() && (!ttf_font_is_builtin() || ttf_font_has_text(sample));
 }
 
+void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const char *text,
+                               const char *font_sample,enum EpdFontFlags align,uint8_t gray,uint8_t background) {
+    if(!fb||!text||!*text||px<=0)return;
+    int above=0,below=0;
+    uint8_t ink=ui_contrast_gray(gray)>>4,back=ui_contrast_gray(background)>>4;
+    if((!s_system_ttf||ttf_font_is_builtin())&&ui_font_has_text(font_sample?font_sample:text)) {
+        ui_font_measure_line_px(px,text,&above,&below);
+        ui_font_draw_text_px(fb,x,center_y+(above-below)/2,px,text,align,ink,back,false);
+    } else {
+        bool prior=ttf_get_antialias();ttf_set_antialias(true);
+        ttf_measure_line_px(px,text,&above,&below);
+        ttf_draw_text_px(fb,x,center_y+(above-below)/2,px,text,align,ink,back);
+        ttf_set_antialias(prior);
+    }
+}
+
 int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample) {
     const char *sample = font_sample ? font_sample : text;
     bool builtin = !title_uses_active_font(sample) && ui_font_has_text(sample);
@@ -351,11 +367,14 @@ void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text
     if (!title_uses_active_font(font_sample ? font_sample : text) &&
         ui_font_has_text(font_sample ? font_sample : text)) {
         ui_font_measure_line_px(px, text, &above, &below);
-        ui_font_draw_title_px(fb, x, center_y + (above - below) / 2, px, text, align);
+        ui_font_draw_text_px(fb, x, center_y + (above - below) / 2, px, text, align,
+                             UI_INK_BLACK, UI_INK_WHITE, false);
     } else {
+        bool prior=ttf_get_antialias();ttf_set_antialias(true);
         ttf_measure_line_px(px, text, &above, &below);
-        ttf_draw_text_px_bw(fb, x, center_y + (above - below) / 2, px, text,
-                            align, UI_INK_BLACK, UI_INK_WHITE);
+        ttf_draw_text_px(fb, x, center_y + (above - below) / 2, px, text,
+                         align, UI_INK_BLACK, UI_INK_WHITE);
+        ttf_set_antialias(prior);
     }
 }
 

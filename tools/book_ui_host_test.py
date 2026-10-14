@@ -50,6 +50,7 @@ typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GE
 #include <unistd.h>
 #include <stdatomic.h>
 #include "ui_text_edit.h"
+#include "book_shelf_categories.h"
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define ESP_ERR_NVS_NOT_FOUND -2
@@ -168,6 +169,7 @@ static bool book_progress_watch_invalidated(const book_progress_watch_t* w){retu
 static void book_progress_watch_destroy(book_progress_watch_t* w){book_progress_watch_t** p=&test_watches;while(*p!=w)p=&(*p)->next;*p=w->next;free(w);}
 #define BOOK_STORE_ROOT_MAX 3
 static book_store_root_t test_roots[BOOK_STORE_ROOT_MAX];
+static const char *app_settings_books_dir(void){return test_roots[0].path;}
 static int test_root_count=1;
 static void* heap_caps_realloc(void* p,size_t n,int caps){(void)caps;return test_oom?NULL:realloc(p,n);}
 static void* heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
@@ -378,10 +380,18 @@ static app_reader_key_action_t app_settings_reader_key_action(unsigned key){retu
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 '''
+unit += r"""
+#define SHELF_CATEGORY_LIMIT 128
+typedef struct{char path[288];int pages[2],count;bool available;}shelf_category_t;
+static shelf_category_t *s_categories;
+static int s_category_count,s_category_capacity,s_category_selected,s_category_menu_page;
+static bool s_category_menu;
+static char s_category_root[288];
+"""
 unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -436,7 +446,7 @@ int main(void) {
     app_ctx_t remote_ctx={0};s_view=SHELF;test_shelf_style=2;s_visible_count=27;
     assert(shelf_turn_page(&remote_ctx,-1)==APP_REDRAW_NONE&&remote_ctx.leaf==0);
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_AREA&&remote_ctx.leaf==1);
-    assert(test_cover_prepares==1&&test_shelf_renders==1&&s_area.y==196&&s_area.height==892);
+    assert(test_cover_prepares==1&&test_shelf_renders==1&&s_area.y==176&&s_area.height==912);
     remote_ctx.leaf=2;
     assert(shelf_turn_page(&remote_ctx,1)==APP_REDRAW_NONE&&remote_ctx.leaf==2);
     assert(shelf_turn_page(&remote_ctx,-1)==APP_REDRAW_AREA&&remote_ctx.leaf==1);
@@ -447,7 +457,7 @@ int main(void) {
     EpdRect left=shelf_page_arrow_rect(-1),right=shelf_page_arrow_rect(1);
     assert(left.y==right.y&&left.y+left.height<=UI_BAR_TOP);
     test_shelf_style=5;s_view=SHELF;s_visible_count=15;assert(shelf_rows()==4&&leaves()==4);
-    for(int i=0;i<4;++i){EpdRect r=row_rect(i);assert(r.y==216+i*197&&r.y+r.height<=1004);}
+    for(int i=0;i<4;++i){EpdRect r=row_rect(i);assert(r.y==184+i*197&&r.y+r.height<=972);}
     s_view=MANAGE;assert(shelf_rows()==9);s_view=SHELF;
     s_visible_count=0;s_view=SHELF;test_shelf_style=0;
     for (int gray=0; gray<=255; ++gray)
@@ -800,7 +810,7 @@ int main(void) {
     test_nav_target=-1;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_nav_target==0);
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
-    free(s_shelf);
+    free(s_shelf);free(s_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
     puts("book_ui_host_test: PASS");
@@ -811,6 +821,6 @@ with tempfile.TemporaryDirectory() as tmp:
     exe = Path(tmp) / "test"
     c.write_text(unit, encoding="utf-8")
     subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[1] / "ui"),
+                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
                     str(c), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

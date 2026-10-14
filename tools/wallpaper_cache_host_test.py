@@ -53,7 +53,7 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
  fb[n/2]=(fb[n/2]&~(15u<<shift))|((gray>>4)<<shift);
 }
 '''
-for name in ('inside_rounded','avatar_content_crop','image_pixels','ui_wallpaper_draw','ui_wallpaper_draw_rounded','ui_wallpaper_prepare_avatar','ui_wallpaper_draw_avatar'):
+for name in ('inside_rounded','avatar_content_crop','image_pixels','ui_wallpaper_draw','ui_wallpaper_draw_rounded','ui_wallpaper_draw_avatar'):
  unit+=function(name,source)+'\n'
 unit+=source.read_text()[source.read_text().index('#ifndef UI_WALLPAPER_CACHE_PARENT'):]
 unit+=r'''
@@ -96,7 +96,16 @@ int main(void){
  assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));
  unsigned before=loads;ui_wallpaper_draw_avatar(frame,avatar,area,22);
  assert(loads==before&&!memcmp(frame,expected,sizeof(frame)));
- alloc_fail=true;assert(!ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));alloc_fail=false;
+ alloc_fail=decode_fail=true;before=loads;memset(avatar,0,sizeof(avatar));assert(ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82)&&loads==before);
+ alloc_fail=decode_fail=false;ui_wallpaper_draw_avatar(frame,avatar,area,22);assert(!memcmp(frame,expected,sizeof(frame)));
+ uint8_t small[60*60];assert(!ui_wallpaper_avatar_cached("/sdcard/avatar.png",small,60));assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",small,60));assert(ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));
+ f=fopen("cache/avatars/avatar-82.bin","r+b");assert(f&&!fseek(f,sizeof(wallpaper_cache_t)+111,SEEK_SET));int damaged=fgetc(f);assert(damaged!=EOF&&!fseek(f,-1,SEEK_CUR)&&fputc(damaged^0x55,f)!=EOF&&!fclose(f));assert(!ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));before=loads;assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82)&&loads==before+1);
+ f=fopen("cache/avatars/avatar-82.bin","wb");assert(f&&fwrite("partial",1,7,f)==7&&!fclose(f));assert(!ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));
+ assert(!ui_wallpaper_avatar_cached("/sdcard/other.png",avatar,82));
+ set_source("replacement.jpg",6300);assert(!ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));alloc_fail=true;assert(!ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));alloc_fail=false;
+ source_mutates=true;assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));source_mutates=false;assert(!ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));assert(ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,82));
+ assert(!remove(source_file)&&!ui_wallpaper_avatar_cached("/sdcard/avatar.png",avatar,82));
+
  assert(!ui_wallpaper_prepare_avatar("/sdcard/avatar.png",avatar,129));
  puts("PASS: pixel-identical 16-gray/dithered wallpaper disk hits without decode/allocation; checksum/truncation/trailing bytes/source/rotation invalidation; bounded failed writes and decode fallback; avatar cached vs original rounded paint");
 }

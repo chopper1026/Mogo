@@ -41,7 +41,7 @@ shelf = r'''
 #include <string.h>
 #include <stddef.h>
 typedef struct {int x,y,width,height;} EpdRect;
-typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;} app_ctx_t;
+typedef struct {void *hl;uint8_t *fb;int64_t now_ms;unsigned leaf;void *request_app;} app_ctx_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_DONE,APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
 enum {SHELF,MANAGE,READING,READER_PANEL_NONE,TOC,EDIT,SEARCH};
 enum EpdDrawMode {MODE_GL16,MODE_DU,MODE_GC16};
@@ -69,11 +69,22 @@ static EpdRect pushed_area;
 static int trace_route[256], trace_mode[256], trace_wave[256];
 static EpdRect trace_area[256];
 static unsigned trace_count;
-enum {DIFF=1,AREA,FULL,WHOLE,FAST,WATER,READER,LOCAL_FULL};
+enum {DIFF=1,AREA,FULL,WHOLE,FAST,WATER,READER,LOCAL_FULL,READER_CLEANUP};
 static int test_style;static bool test_fast;
 static int app_settings_shelf_style(void){return test_style;}
 static bool app_settings_main_fast_refresh(void){return test_fast;}
 static int shelf_rows(void){return test_style==5?4:9;}
+static bool s_reader_clock_pending,s_cover_batch_present_pending;
+static int64_t s_reader_clock_minute,s_reader_clock_painted_minute;
+static unsigned s_cover_dirty_mask,s_cover_present_mask;
+static bool reader_status_visible(void){return false;}
+static EpdRect reader_status_area(void){return (EpdRect){24,18,156,44};}
+static int64_t ui_nav_clock_minute(void){return 100;}
+static void reader_status_paint(uint8_t *fb){(void)fb;}
+static bool shelf_cover_frame_ready(void){return true;}
+#define READER_PANEL_BACKGROUND_PREVIEW 98
+static const char *app_settings_book_background_path(void){return "";}
+static void ui_reader_background_prepare(const char *path){(void)path;}
 static unsigned test_list_draws,test_prepares;
 static EpdRect paint_list_cover_feedback(app_ctx_t *ctx,int row){(void)ctx;++test_list_draws;return (EpdRect){71,228+row*197,120,164};}
 static EpdRect row_rect(int row){return (EpdRect){42+(row%3)*210,220+(row/3)*272,176,240};}
@@ -113,7 +124,6 @@ static int test_tick_us=12000,test_tick_sets;
 static int e0470_page_turn_tick_us(void){return test_tick_us;}
 static void e0470_page_turn_set_tick_us(int us){test_tick_us=us;++test_tick_sets;}
 static int book_layout_page_image_count(unsigned page){return !test_hide_images&&test_types[s_chapter][page]?1:0;}
-static int book_layout_page_image(unsigned page){return !test_hide_images&&test_types[s_chapter][page]==2?0:-1;}
 static unsigned book_layout_page_count(void){return 2;}
 static unsigned book_chapter_count(void){return 2;}
 static bool app_settings_reader_hide_images(void){return test_hide_images;}
@@ -136,6 +146,7 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const int *wave,
 static enum EpdDrawError update_display_area_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(AREA,mode,area);}
 static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(LOCAL_FULL,mode,area);}
 static enum EpdDrawError update_display_with(void *hl,const int *wave,enum EpdDrawMode mode){(void)hl;(void)wave;return record(WHOLE,mode,(EpdRect){0});}
+static enum EpdDrawError update_display_reader_cleanup(void *hl,const int *wave){(void)hl;trace_wave[trace_count]=*wave;return record(READER_CLEANUP,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;return record(FULL,MODE_GC16,(EpdRect){0});}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return record(FAST,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_mode_diff(void *hl,enum EpdDrawMode mode){(void)hl;return record(READER,mode,(EpdRect){0});}
@@ -202,7 +213,7 @@ int main(void){
  for(int full=0;full<2;++full){
    s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
    s_reader_footer_pending=!full;trace_count=0;
-   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==FULL&&pushed_mode==MODE_GC16);
+   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==READER_CLEANUP&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
    s_reader_turn_pending=true;trace_count=0;
    assert(present(&ctx,APP_REDRAW_FULL)&&trace_count==1&&route==FULL);
  }
@@ -262,11 +273,11 @@ int main(void){
    app_redraw_t redraw=turn_page(&ctx,1);
    bool eligible=hidden||(from==0&&to==0);
    assert(s_reader_fullscreen && s_reader_panel==READER_PANEL_NONE);
-   if (!full) {assert(redraw==APP_REDRAW_PAGE&&!s_reader_turn_pending);trace_count=0;present(&ctx,redraw);assert(trace_route[0]==(to==2&&!hidden?WHOLE:READER));continue;}
+   if (!full) {assert(redraw==APP_REDRAW_PAGE&&!s_reader_turn_pending);trace_count=0;present(&ctx,redraw);assert(trace_route[0]==(to&&!hidden?WHOLE:READER));continue;}
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
    trace_count=0;present(&ctx,redraw);
    if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
-   else if(to==2)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
+   else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
    else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==(full?DIFF:AREA));
    assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
  }
@@ -300,7 +311,7 @@ int main(void){
    s_page=0;trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
    test_full_pages=policy?1:0;test_effect=policy?0:1;s_turns=0;
    app_redraw_t redraw=turn_page(&ctx,1);trace_count=0;present(&ctx,redraw);
-   assert(trace_route[0]==(policy?FULL:WATER));
+   assert(trace_route[0]==(policy?READER_CLEANUP:WATER));
  }
  test_full_pages=0;test_effect=0;s_page=0;test_types[0][0]=1;test_image.gray=NULL;
  trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));assert(!s_reader_text_frame);
@@ -366,7 +377,7 @@ status += defines + "\n"
 for path, name in (("main/ui/ui_kit.c", "ui_text_fixed_context_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_context_vc"),
-                   ("main/ui/ui_kit.c", "ui_text_fixed_vc"), ("main/ui/ui_nav.c", "ui_nav_status")):
+                   ("main/ui/ui_kit.c", "ui_text_fixed_vc"), ("main/ui/ui_nav.c", "status_time"), ("main/ui/ui_nav.c", "clock_text"), ("main/ui/ui_nav.c", "ui_nav_status")):
     status += function(path, name) + "\n"
 status += r'''
 int main(void){

@@ -4,7 +4,7 @@
  */
 #pragma once
 #include "ui_kit.h"
-typedef enum { UI_CLICK_NAV, UI_CLICK_BACK } ui_click_kind_t;
+typedef enum { UI_CLICK_NAV, UI_CLICK_BACK, UI_CLICK_BACK_SMALL } ui_click_kind_t;
 void ui_click_feedback_reset(void);
 /// 仅主循环当前帧可注册；后台阅读预绘制不能改控件表。/ Only the loop's current frame may register; reader prefetch cannot alter controls.
 void ui_click_feedback_begin(uint8_t *fb);

@@ -37,7 +37,7 @@ code=r'''
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 typedef struct {int x,y,width,height;} EpdRect;
-typedef enum {UI_CLICK_NAV,UI_CLICK_BACK} ui_click_kind_t;
+typedef enum {UI_CLICK_NAV,UI_CLICK_BACK,UI_CLICK_BACK_SMALL} ui_click_kind_t;
 enum {EPD_ROT_LANDSCAPE,EPD_ROT_PORTRAIT,EPD_ROT_INVERTED_LANDSCAPE,EPD_ROT_INVERTED_PORTRAIT};
 static int rotation;
 #define W 1216
@@ -106,6 +106,13 @@ int main(void){
    assert(!ui_click_feedback_release(frame,&r));
    oom=true;assert(!ui_click_feedback_press(frame,58,114,&r)&&!live&&!memcmp(frame,saved,BYTES));oom=false;
    ui_click_feedback_reset();assert(!ui_click_feedback_press(frame,58,114,&r));
+   patterned();ui_click_feedback_begin(frame);
+   ui_click_feedback_register(frame,(EpdRect){36,84,44,44},UI_CLICK_BACK_SMALL,UI_ICON_CHEVRON_LEFT);
+   assert(ui_click_feedback_press(frame,58,106,&r));
+   assert(r.x>=36&&r.y>=84&&r.x+r.width<=80&&r.y+r.height<=128);
+   for(int yy=0;yy<epd_rotated_display_height();++yy)for(int xx=0;xx<epd_rotated_display_width();++xx)
+    if(xx<36||xx>=80||yy<84||yy>=128)assert(pixel(frame,xx,yy)==pixel(saved,xx,yy));
+   assert(ui_click_feedback_release(frame,&r)&&!live&&!memcmp(frame,saved,BYTES));
    if(fast)break;
   }
  }

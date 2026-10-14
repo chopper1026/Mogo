@@ -47,6 +47,7 @@ static bool valid_record(unsigned ns, uint8_t type, const char *key, const uint8
         uint32_t magic = 0;
         if (len >= 4) memcpy(&magic, data, 4);
         if (!strcmp(key, "stats")) return type == NVS_TYPE_BLOB && len == 32 && magic == UINT32_C(0x52505431);
+        if (!strcmp(key, "heat32")) return type == NVS_TYPE_BLOB && len == 260 && magic == UINT32_C(0x52504832);
         if (!strcmp(key, "heatmap")) return type == NVS_TYPE_BLOB && len == 244 && magic == UINT32_C(0x52504831);
         return false;
     }

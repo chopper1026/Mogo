@@ -32,7 +32,7 @@
 static const char *const labels[] = {"首页", "书架", "文件管理", "设置"};
 
 void ui_nav_back(uint8_t *fb, int x, int y) {
-    ui_click_feedback_register(fb, (EpdRect){x - 10, y + 3, 64, 64}, UI_CLICK_BACK, UI_ICON_CHEVRON_LEFT);
+    ui_click_feedback_register(fb, (EpdRect){x - 10, y + 3, 64, 64}, UI_CLICK_BACK_SMALL, UI_ICON_CHEVRON_LEFT);
     // 参考系统题头缩小返回键，中心仍保持在 y=113。/ Match the smaller reference back control while retaining the title centerline.
     ui_fill_round_rect(fb, (EpdRect){x, y + 13, 44, 44}, 22, UI_GRAY_WHITE);
     ui_draw_round_rect(fb, (EpdRect){x, y + 13, 44, 44}, 22, UI_NAV_BACK_BORDER_GRAY);
@@ -87,15 +87,22 @@ int64_t ui_nav_clock_minute(void) {
     time_t now = status_time();
     return now >= 1704067200 ? (int64_t)now / 60 : -1;
 }
-void ui_nav_status(uint8_t *fb) {
+static void clock_text(char *clock, size_t capacity) {
     time_t now = status_time();
-    const pmu_snapshot_t *pmu = read_pico_pmu_get();
-    char clock[12] = "--:--";
+    snprintf(clock,capacity,"--:--");
     if (now > 1704067200) {
         time_t china = now + 8 * 3600;
         struct tm date;
-        if (gmtime_r(&china, &date)) snprintf(clock, sizeof(clock), "%02d:%02d", date.tm_hour, date.tm_min);
+        if (gmtime_r(&china, &date)) snprintf(clock, capacity, "%02d:%02d", date.tm_hour, date.tm_min);
     }
+}
+void ui_nav_clock_draw(uint8_t *fb) {
+    char clock[12]; clock_text(clock,sizeof(clock));
+    ui_text_fixed_vc(fb,36,40,UI_STATUS_TIME_PX,clock,EPD_DRAW_ALIGN_LEFT,false);
+}
+void ui_nav_status(uint8_t *fb) {
+    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    char clock[12]; clock_text(clock,sizeof(clock));
     const int status_center_y = 40;
     // 固定状态栏字号，让系统字体缩放时文字仍与图标共用中心线。
     // Keep status type fixed so text and glyphs share one centerline at every system font scale.

@@ -24,10 +24,13 @@ bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f
 
 const app_desc_t app_book = {.title="book"};
 const app_desc_t app_transfer = {.title="transfer"};
-EpdRect ui_power_dialog_rect(void) {return (EpdRect){72,240,540,700};}
-void ui_power_dialog_draw(uint8_t* fb) {(void)fb;}
-ui_power_action_t ui_power_dialog_handle(const ui_gesture_event_t* event) {(void)event;return UI_POWER_ACTION_NONE;}
-void ui_power_final_draw(uint8_t* fb,bool restarting) {(void)fb;(void)restarting;}
+static int power_open_draws, power_controls_draws, power_final_draws;
+static int power_trigger_step = -1, shutdowns, restarts;
+static bool staged_shutdown;
+EpdRect ui_power_dialog_rect(void) {return (EpdRect){0,0,684,1216};}
+void ui_power_dialog_draw(uint8_t* fb,const ui_power_dialog_t *dialog) {(void)fb;(void)dialog;++power_open_draws;}
+void ui_power_dialog_draw_controls(uint8_t* fb,const ui_power_dialog_t *dialog) {(void)fb;(void)dialog;++power_controls_draws;}
+void ui_power_final_draw(uint8_t* fb,bool restarting) {(void)fb;(void)restarting;++power_final_draws;}
 
 static jmp_buf done;
 typedef struct { int x, y, count, error; } sample_t;
@@ -36,7 +39,7 @@ static int sample_count, step, ticks, enters, exits, touch_calls, keys[3], event
 static int menus, highlights, restores, fulls, mode, tick_consumed[32];
 static int long_keys;
 static uint8_t idle_minutes;
-static int idle_locks, before_locks, lock_feedback_calls, lock_badges;
+static int idle_locks, before_locks, lock_feedback_calls, lock_badges, wake_clean_requests;
 static bool feedback_enabled;
 static bool online_busy;
 static bool ble_enabled, saved_wifi, upload_busy, click_enabled, click_active;
@@ -103,6 +106,7 @@ const char* esp_err_to_name(int e) {(void)e;return "test";}
 int64_t esp_timer_get_time(void) {return time_offset+(int64_t)(step+1)*time_step;}
 void vTaskDelay(int ms) {(void)ms;if (++step>=sample_count) longjmp(done,1);}
 bool continuous_du_init(void) {return true;}
+void display_request_full_refresh(void) {++wake_clean_requests;}
 void guard_draw_result(EpdiyHighlevelState* h,enum EpdDrawError e) {(void)h;assert(e==0);}
 enum EpdDrawError update_display_area_with(EpdiyHighlevelState*h,const void*w,int m,EpdRect a) {(void)h;(void)w;(void)a;nav_area_draws+=nav_armed!=NULL;nav_armed=NULL;if(m==MODE_DU)du_areas++;else if(m==MODE_GL16)gl_areas++;return 0;}
 enum EpdDrawError update_display_full(EpdiyHighlevelState*h) {(void)h;fulls++;nav_full_arms+=nav_armed!=NULL;nav_armed=NULL;return 0;}
@@ -115,17 +119,17 @@ void display_main_transition_cancel(void) {nav_armed=NULL;}
 void display_main_transition_arm(const void* owner, bool shelf_exit, bool changing_page) {(void)changing_page;display_main_transition_cancel();nav_armed=owner;++nav_arms;shelf_exit_arms+=shelf_exit;}
 void display_main_transition_disarm(void) {nav_armed=NULL;}
 void rails_idle_check(int64_t n) {(void)n;}
-bool read_pico_pmu_ready(void) {return lock_due;}
-read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return READ_PICO_PMU_KEY_SHORT;}
+bool read_pico_pmu_ready(void) {return lock_due||step==power_trigger_step;}
+read_pico_pmu_key_action_t read_pico_pmu_take_key_action(void) {return step==power_trigger_step?READ_PICO_PMU_KEY_LONG:READ_PICO_PMU_KEY_SHORT;}
 void enter_lock_and_sleep(EpdiyHighlevelState*h,int64_t*t,void*a,void*tp,bool reader,bool light_only) {(void)tp;(void)h;(void)t;(void)a;(void)reader;(void)light_only;assert(!nav_armed);++idle_locks;lock_due=false;time_offset+=1000000;}
 void app_lock_feedback(EpdiyHighlevelState*h) {(void)h;++lock_feedback_calls;if(feedback_enabled){assert(!before_locks&&!idle_locks);++lock_badges;}}
 void app_lock_wait_key_idle(int ms) {(void)ms;}
-esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {(void)mode;longjmp(done,1);}
-void app_restart_host(void) {longjmp(done,1);}
+esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {assert(mode==APP_SLEEP_OFF);++shutdowns;longjmp(done,1);}
+void app_restart_host(void) {++restarts;longjmp(done,1);}
 void epd_poweroff(void) {}
 const char* app_settings_font_path(void) {return "builtin";}
 bool app_settings_reader_power_turn(void) {return false;}
-app_shutdown_style_t app_settings_shutdown_style(void) {return APP_SHUTDOWN_FULL;}
+app_shutdown_style_t app_settings_shutdown_style(void) {return staged_shutdown ? APP_SHUTDOWN_STAGED : APP_SHUTDOWN_FULL;}
 bool ttf_font_path_is_builtin(const char*p) {(void)p;return !font_due&&!saved_sd_font;}
 bool ttf_font_ready(void) {return true;}
 bool ttf_font_is_builtin(void) {return !sd_font;}
@@ -178,10 +182,11 @@ static app_redraw_t tick(app_ctx_t*c) {
 }
 static app_redraw_t consume_power(app_ctx_t*c) {(void)c;lock_due=false;return APP_REDRAW_DONE;}
 static void reset(void) {
+    power_open_draws=power_controls_draws=power_final_draws=shutdowns=restarts=0;power_trigger_step=-1;staged_shutdown=false;
     ble_enabled=saved_wifi=upload_busy=click_enabled=click_active=false;
     transfer_status=(read_pico_transfer_status_t){0};
     quick_draws=quick_gl=quick_du=wifi_starts=wifi_stops=ble_resets=click_presses=click_restores=0;
-    main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=0;feedback_enabled=false;online_busy=false;
+    main_fast=main_water=false;shelf_exit_arms=0;idle_minutes=0;idle_locks=before_locks=lock_feedback_calls=lock_badges=wake_clean_requests=0;feedback_enabled=false;online_busy=false;
     nav_arms=nav_draws=nav_full_arms=nav_area_draws=0;nav_armed=NULL;
     main_source_visible=main_target_visible=true;
     media_test=sd_font=saved_sd_font=false;media_lost=media_ready=builtin_opens=font_opens=probes=0;loss_step=-1;
@@ -348,11 +353,11 @@ int main(void) {
     assert(media_lost==2&&builtin_opens==2&&!probes&&font_opens==1);
     reset();idle_minutes=1;time_step=60000000;first.on_before_lock=before_lock;
     add(0,0,0,0);add(0,0,0,0);run();
-    assert(idle_locks==1&&before_locks==1); // Real scheduler flushes before automatic lock.
+    assert(idle_locks==1&&before_locks==1&&wake_clean_requests==1); // Real scheduler flushes before automatic lock.
     reset();idle_minutes=1;time_step=60000000;shake_activity=true;
     add(0,0,0,0);run();assert(!idle_locks);
     reset();idle_minutes=1;time_step=60000000;shake_activity=true;
-    add(0,0,0,0);add(0,0,0,0);run();assert(idle_locks==1); /* Activity is consumed once, not latched. */
+    add(0,0,0,0);add(0,0,0,0);run();assert(idle_locks==1&&wake_clean_requests==1); /* Activity is consumed once, not latched. */
     reset();idle_minutes=0;time_step=600000000;
     add(0,0,0,0);add(0,0,0,0);run();assert(!idle_locks);
     reset();idle_minutes=1;time_step=600000000;online_busy=true;
@@ -445,6 +450,27 @@ int main(void) {
         add(0,0,0,0);add(0,0,0,0);run();assert(idle_locks==1&&before_locks==1&&!lock_feedback_calls&&!lock_badges);
     }
     puts("PASS: manual lock acknowledgement precedes page save/reader joins in all three modes; consumed power turns and auto sleep omit the badge");
+    reset();power_trigger_step=1;time_step=3000000;
+    add(0,0,0,0);add(0,0,0,0);add(128,374,1,0);add(240,374,1,0);add(556,374,1,0);add(0,0,0,0);run();
+    assert(power_open_draws==1&&power_controls_draws==2&&shutdowns==1&&!restarts&&power_final_draws==1&&!touch_calls&&ticks==1&&du_areas==2&&gl_areas==1);
+    reset();power_trigger_step=1;time_step=3000000;staged_shutdown=true;
+    add(0,0,0,0);add(0,0,0,0);add(128,374,1,0);add(556,374,1,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(idle_locks==1&&wake_clean_requests==1&&!shutdowns&&!restarts&&!power_final_draws);
+    reset();power_trigger_step=1;time_step=3000000;
+    add(0,0,0,0);add(0,0,0,0);add(238,960,1,0);add(0,0,0,0);run();
+    assert(restarts==1&&!shutdowns&&power_final_draws==1);
+    reset();enable_main_tabs();power_trigger_step=1;time_step=3000000;
+    add(0,0,0,0);add(0,0,0,0);add(446,960,1,0);add(0,0,0,0);add(0,0,0,0);run();
+    assert(!shutdowns&&!restarts&&!power_final_draws&&nav_arms==0&&mode==1);
+    for(int fault=0;fault<2;++fault){
+        reset();power_trigger_step=1;time_step=3000000;
+        add(0,0,0,0);add(0,0,0,0);add(0,0,0,0);add(128,374,1,0);add(556,374,1,0);add(556,374,fault?2:0,fault?0:1);add(0,0,0,0);run();
+        assert(!shutdowns&&!restarts&&power_controls_draws==2&&!touch_calls);
+    }
+    reset();power_trigger_step=1;time_step=3000000;
+    add(0,0,0,0);add(128,374,1,0);add(556,374,1,0);add(0,0,0,0);run();
+    assert(power_open_draws==1&&!power_controls_draws&&!shutdowns&&!restarts);
+    puts("PASS: real loop and power recognizer: DU-only contact, release commits off/staged sleep/restart once, cancel restores full navigation, touch/multitouch errors and entry-held suppression");
     puts("app_loop: 50 scheduler scenarios passed, including automatic lock, save callback, input reset and busy guards");
     return 0;
 }
@@ -456,3 +482,7 @@ bool pico_online_busy(void) { return online_busy; }
 
 uint8_t app_settings_auto_lock_minutes(void){return idle_minutes;}
 uint32_t ble_pt_input_serial(void){return 0;}
+
+bool display_follow_busy(void){return false;}
+
+void crash_note_log(void){}

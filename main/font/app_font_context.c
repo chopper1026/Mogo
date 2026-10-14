@@ -78,7 +78,7 @@ bool app_font_activate_system(void) {
 
 bool app_font_activate_reading(void) {
     s_reading = true;
-    ttf_set_stroke_adjust(app_settings_book_weight());
+    ttf_set_stroke_adjust_fine(app_settings_book_weight_fine());
     ttf_set_antialias(app_settings_book_antialias());
     const char* saved = pico_boot_recovery() ? TTF_FONT_BUILTIN : app_settings_font_path();
     bool changed = activate(ttf_font_path_is_builtin(saved) ? TTF_FONT_BUILTIN : saved);
@@ -102,7 +102,7 @@ void app_font_end_lock(const app_lock_font_t *saved) {
     if (!saved) return;
     (void)activate(saved->path);
     s_reading = saved->reading;
-    ttf_set_stroke_adjust(s_reading ? app_settings_book_weight() : 0);
+    ttf_set_stroke_adjust_fine(s_reading ? app_settings_book_weight_fine() : 0);
     ttf_set_antialias(!s_reading || app_settings_book_antialias());
     const char *chosen = app_settings_system_font_path();
     ui_text_set_system_font(!s_reading && !pico_boot_recovery() && chosen[0] &&
