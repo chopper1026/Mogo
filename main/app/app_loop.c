@@ -67,8 +67,56 @@
 #include "ui_quick_menu.h"
 #include "ui_click_feedback.h"
 #include "usb_storage.h"
+#include "touch_diag.h"
+#include "touch_sampler.h"
+#if CONFIG_TOUCH_DIAG && CONFIG_TOUCH_DIAG_BEEP
+#include "read_pico_buzzer.h"
+#endif
 
 #define TAG "app_loop"
+
+#if CONFIG_TOUCH_DIAG
+// 丢点诊断计数与峰值；单实例，文件级即可。/ Drop-diag counters; single instance.
+static int64_t td_last_read_us;      // 上次读触摸时刻 / previous cst836u_read time
+static int64_t td_stats_ms;          // 上次统计输出时刻 / previous stats line
+static int64_t td_err_last_ms;       // READ_ERR 限流 / READ_ERR rate limit
+static unsigned td_err_burst;        // 限流窗口内堆积次数 / bursts hidden by the limit
+static unsigned td_press, td_tap, td_swipe, td_longp, td_cancel;
+static unsigned td_read_err, td_kill_err, td_multi, td_stall, td_present_over;
+static unsigned td_replays, td_replay_frames;  // F4 回放事件与帧数 / replay events and frames
+static int32_t td_max_stall_ms, td_max_present_ms;
+static bool td_multi_active;         // 多点去抖 / multitouch transition latch
+static const char* td_gest_name(ui_gesture_type_t t) {
+    switch (t) {
+        case UI_GESTURE_PRESS: return "PRESS";
+        case UI_GESTURE_MOVE: return "MOVE";
+        case UI_GESTURE_LONG_PRESS: return "LONG";
+        case UI_GESTURE_TAP: return "TAP";
+        case UI_GESTURE_SWIPE_L: return "SWIPE_L";
+        case UI_GESTURE_SWIPE_R: return "SWIPE_R";
+        case UI_GESTURE_SWIPE_U: return "SWIPE_U";
+        case UI_GESTURE_SWIPE_D: return "SWIPE_D";
+        case UI_GESTURE_CANCEL: return "CANCEL";
+        default: return "?";
+    }
+}
+#if CONFIG_TOUCH_DIAG_BEEP
+static void td_beep_task(void* arg) {
+    (void)arg;
+    (void)read_pico_buzzer_tone(2200, 60);
+    vTaskDelete(NULL);
+}
+void touch_diag_beep(void) {
+    if (xTaskCreate(td_beep_task, "tdbeep", 3072, NULL, 3, NULL) != pdPASS) return;
+}
+#else
+void touch_diag_beep(void) { }
+#endif
+void touch_diag_block(const char* src, int64_t t0_us) {
+    int32_t ms = (int32_t)((esp_timer_get_time() - t0_us) / 1000);
+    if (ms > 50) TD_LOGI("BLOCK src=%s ms=%d", src, ms);
+}
+#endif  // CONFIG_TOUCH_DIAG
 
 // 触摸芯片报点率远高于屏幕，主循环空转一轮只等这么久。
 // Touch reports far faster than the panel; idle this long per loop.
@@ -147,7 +195,11 @@ void app_lock_ignore_for(int64_t ms) {
     s_lock_ignore_until_ms = esp_timer_get_time() / 1000 + ms;
 }
 
+#if CONFIG_TOUCH_DIAG
+static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+#else
 void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+#endif
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active()) {
         // 切页固定底栏之前先复位真实按压像素，避免把放大的图标当作长期基准。
@@ -202,6 +254,20 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
     main_present_finished(ctx, app, redraw);
 }
 
+#if CONFIG_TOUCH_DIAG
+void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+    int64_t t0 = esp_timer_get_time();
+    app_present_impl(ctx, app, redraw);
+    int32_t ms = (int32_t)((esp_timer_get_time() - t0) / 1000);
+    // 刷新阻塞窗口是“点击落空”的头号嫌疑，超过 100ms 的都留痕。
+    // Refresh blocking is the prime suspect for lost taps; record every window over 100ms.
+    if (ms > 100) {
+        if (ms > td_max_present_ms) td_max_present_ms = ms;
+        td_present_over++;
+        TD_LOGI("PRESENT ms=%d redraw=%d", ms, (int)redraw);
+    }
+}
+#endif
 // 反馈只推控件附近，失败后重新绘制当前页面；不占用底栏切页许可。
 // Push feedback only near its control, repainting the current page on failure without consuming navigation permission.
 static void click_present(app_ctx_t *ctx, const app_desc_t *current, EpdRect area) {
@@ -323,6 +389,95 @@ static void debounce_touch(
         }
     }
     memcpy(latest->raw, raw->raw, sizeof(raw->raw));
+}
+
+// ---- F4 逐帧触摸管线（正常 tick 与回放共用；docs/local/2026-10-14-f4-touch-sampler-plan.md §3.2）----
+
+// 采样器未跑时的降级直读也复用的最近帧。/ Last popped frame for reuse when idle.
+static touch_frame_t s_last_frame;
+
+// 由采样帧重建触摸快照：多点 points 与原始寄存器不回放——多点帧只承担 count>1
+// 的拒绝语义，raw 仅诊断 RAW_INVALID 消费而该事件在驱动内（采样侧）打出。
+// / Rebuild a touch snapshot from a frame; multi-point payloads and raw regs
+// are not replayed (count>1 rejection semantics only).
+static void frame_to_touch(const touch_frame_t* f, cst836u_touch_t* t) {
+    memset(t, 0, sizeof(*t));
+    t->touched = f->touched != 0;
+    t->count = f->count;
+    t->x = f->x;
+    t->y = f->y;
+}
+
+// 单帧摄取：边沿判定（相对 *was_touched）→ 诊断计数 → 去抖入 latest → ctx 字段。
+// 正常 tick 在原直读位置调用一次；回放每帧调用一次。frame_ms：回放传帧时间戳
+// （队列内单调，手势机倒退保护不触发），正常传真实时间。
+// / Ingest one frame: edges vs *was_touched → diag counters → debounce into
+// latest → ctx fields. Called once per normal tick, once per replayed frame.
+static void ingest_touch_frame(app_ctx_t* ctx, cst836u_touch_t* latest,
+                               const cst836u_touch_t* touch, esp_err_t err,
+                               bool* was_touched, int64_t frame_ms,
+                               int64_t* last_input_ms,
+                               bool* out_pressed, bool* out_released) {
+    const bool pressed = touch->touched && !*was_touched;
+    const bool released = !touch->touched && *was_touched;
+#if CONFIG_TOUCH_DIAG
+    if (pressed) {
+        td_press++;
+        TD_LOGI("PRESS x=%u y=%u n=%u", touch->x, touch->y, touch->count);
+    }
+    if (err == ESP_OK && touch->touched && touch->count > 1) {
+        if (!td_multi_active) {
+            td_multi_active = true;
+            td_multi++;
+            TD_LOGI("MULTI n=%u x=%u y=%u", touch->count, touch->x, touch->y);
+        }
+    } else if (td_multi_active) td_multi_active = false;
+#endif
+    debounce_touch(latest, touch, released);
+    ctx->now_ms = frame_ms;
+    if (err == ESP_OK && (touch->touched || released)) *last_input_ms = frame_ms;
+    ctx->pressed = pressed;
+    ctx->released = released;
+    ctx->consumed = false;
+    *out_pressed = pressed;
+    *out_released = released;
+}
+
+// 手势分发：原主循环 829-857 行整块原样抽取，正常 tick 与回放共用，语义与抽取前
+// 一致。owned_by_other = 电源弹窗 / 快捷层 / 菜单任一持有输入时为真。
+// / Gesture dispatch extracted verbatim from the main loop; shared by the
+// normal tick and replay. owned_by_other covers power dialog / quick layer / menu.
+static void dispatch_gesture_frame(app_ctx_t* ctx, const app_desc_t* current,
+                                   ui_gesture_t* gesture, esp_err_t err,
+                                   bool owned_by_other) {
+    if (owned_by_other || !current->on_gesture || err != ESP_OK) return;
+    ui_gesture_event_t event;
+    if (ui_gesture_feed(gesture, ctx, &event)) {
+#if CONFIG_TOUCH_DIAG
+        // MOVE 逐帧太多不记；按下与终态全记。MOVE frames are too noisy; log press + terminal.
+        if (event.type != UI_GESTURE_MOVE) {
+            switch (event.type) {
+                case UI_GESTURE_TAP: td_tap++; break;
+                case UI_GESTURE_LONG_PRESS: td_longp++; break;
+                case UI_GESTURE_CANCEL:
+                    td_cancel++;
+                    touch_diag_beep();
+                    break;
+                case UI_GESTURE_SWIPE_L: case UI_GESTURE_SWIPE_R:
+                case UI_GESTURE_SWIPE_U: case UI_GESTURE_SWIPE_D:
+                    td_swipe++;
+                    break;
+                default: break;
+            }
+            TD_LOGI("GEND t=%s x0=%u y0=%u x=%u y=%u ms=%d",
+                    td_gest_name(event.type), event.x0, event.y0, event.x, event.y,
+                    (int)event.hold_ms);
+        }
+#endif
+        app_redraw_t redraw = current->on_gesture(ctx, &event);
+        present_page(ctx, current, gesture, redraw);
+        if (redraw != APP_REDRAW_NONE) ctx->consumed = true;
+    }
 }
 
 static bool try_load_saved_sd_font(bool allow_probe) {
@@ -473,6 +628,12 @@ void app_loop_run(const app_loop_config_t* config) {
     // The previous panic scene, when there was one: logged here, and shown on the home screen.
     crash_note_log();
 
+    // F4：主循环被刷屏等操作阻塞期间由采样任务持续读触摸，恢复后逐帧回放，边沿
+    // 不丢；任务创建失败时 active() 为假，循环内自动回退直读（原行为）。
+    // / F4: a dedicated task keeps sampling while the loop is blocked and frames
+    // are replayed on wake; if the task cannot start, the loop reads directly.
+    touch_sampler_start(config->tp);
+
     while (true) {
         unsigned requested_cover_policy = (unsigned)app_settings_main_refresh_mode() | ((unsigned)app_settings_system_contrast() << 8);
         if (requested_cover_policy != cover_policy) {
@@ -480,24 +641,94 @@ void app_loop_run(const app_loop_config_t* config) {
             cover_policy = requested_cover_policy;
         }
         cst836u_touch_t touch = { 0 };
-        esp_err_t err = cst836u_read(config->tp, &touch);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "CST836U read failed: %s", esp_err_to_name(err));
-            memset(&touch, 0, sizeof(touch));
+        esp_err_t err = ESP_OK;
+        int64_t frame_ms = esp_timer_get_time() / 1000;
+        bool replayed = false;
+        bool pressed = false, released = false;
+#if CONFIG_TOUCH_DIAG
+        int64_t td_gap_ms = td_last_read_us ? (esp_timer_get_time() - td_last_read_us) / 1000 : 0;
+        td_last_read_us = esp_timer_get_time();
+#endif
+        if (touch_sampler_active()) {
+            touch_frame_t f;
+            if (touch_sampler_pending() > 1) {
+                // 从阻塞中恢复：一次性排空积压，逐帧走摄取+手势管线（回放）。
+                // 回放期间 ctx.now_ms 取帧时间戳（队列内单调，不触发手势机倒退
+                // 保护），排空后恢复真实时间；必须回放全部帧而非只回放边沿——
+                // 手势 moved 判定依赖中间点轨迹（方案 §3.2）。出现页面切换请求
+                // 即停止排空：剩余帧留待切页后下一轮，避免旧页多吃输入。
+#if CONFIG_TOUCH_DIAG
+                uint32_t n = 0;
+                int64_t first_ms = 0, last_ms = 0;
+#endif
+                while (touch_sampler_pop(&f)) {
+                    frame_to_touch(&f, &touch);
+                    ingest_touch_frame(&ctx, &latest, &touch, ESP_OK, &was_touched,
+                                       (int64_t)f.t_ms, &last_input_ms, &pressed, &released);
+                    dispatch_gesture_frame(&ctx, current, &gesture, ESP_OK, menu_open);
+                    was_touched = touch.touched;
+#if CONFIG_TOUCH_DIAG
+                    n++;
+                    if (n == 1) first_ms = (int64_t)f.t_ms;
+                    last_ms = (int64_t)f.t_ms;
+#endif
+                    if (ctx.request_app || ctx.request_menu || ctx.request_return) break;
+                }
+                replayed = true;
+                frame_ms = esp_timer_get_time() / 1000;
+#if CONFIG_TOUCH_DIAG
+                td_replays++;
+                td_replay_frames += n;
+                TD_LOGI("REPLAY n=%u ms=%d", (unsigned)n, (int)(last_ms - first_ms));
+#endif
+            } else if (touch_sampler_pop(&f)) {
+                s_last_frame = f;
+                frame_to_touch(&s_last_frame, &touch);
+            } else {
+                // 无新帧：复用最近帧（采样节拍 5ms 与循环节拍不完全同相），边沿天然无变化。
+                // / No new frame: reuse the last one; edges are unchanged by construction.
+                frame_to_touch(&s_last_frame, &touch);
+            }
+        } else {
+            err = cst836u_read(config->tp, &touch);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "CST836U read failed: %s", esp_err_to_name(err));
+#if CONFIG_TOUCH_DIAG
+                td_read_err++;
+                // 手指按着时出错：本轮点击注定报废（后续边沿丢失）。单独计数。
+                // Error while the finger is down: this tap is doomed (edge lost). Counted alone.
+                if (was_touched) td_kill_err++;
+                {
+                    int64_t now_ms = esp_timer_get_time() / 1000;
+                    if (now_ms - td_err_last_ms > 500) {
+                        TD_LOGI("READ_ERR err=%s finger=%d kill=%u burst=%u",
+                                esp_err_to_name(err), (int)was_touched, td_kill_err, td_err_burst);
+                        td_err_last_ms = now_ms;
+                        td_err_burst = 0;
+                    } else td_err_burst++;
+                }
+#endif
+                memset(&touch, 0, sizeof(touch));
+            }
+            frame_ms = esp_timer_get_time() / 1000;
         }
-
-        const bool pressed = touch.touched && !was_touched;
-        const bool released = !touch.touched && was_touched;
-        debounce_touch(&latest, &touch, released);
-        ctx.now_ms = esp_timer_get_time() / 1000;
-        if (err == ESP_OK && (touch.touched || released)) last_input_ms = ctx.now_ms;
+#if CONFIG_TOUCH_DIAG
+        // STALL 仅正常迭代累计；回放迭代的阻塞窗口由 REPLAY 行承担证据链（方案 §3.3）。
+        // 相邻两次处理间隔超过 50ms：这轮里循环被别的活儿阻塞（刷屏、字体、PMU…）。
+        if (!replayed && td_gap_ms > 50) {
+            td_stall++;
+            if (td_gap_ms > td_max_stall_ms) td_max_stall_ms = (int32_t)td_gap_ms;
+            TD_LOGI("STALL gap=%dms", (int)td_gap_ms);
+        }
+#endif
+        if (!replayed) {
+            ingest_touch_frame(&ctx, &latest, &touch, err, &was_touched,
+                               frame_ms, &last_input_ms, &pressed, &released);
+        }
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
-            read_pico_transfer_service_poll();
+            TD_TIME("transfer_poll", read_pico_transfer_service_poll());
         }
-        ctx.pressed = pressed;
-        ctx.released = released;
-        ctx.consumed = false;
         // A load may have captured navigation after the prior switch. Consume it at the normal boundary.
 
         ctx.request_menu = false;
@@ -509,7 +740,9 @@ void app_loop_run(const app_loop_config_t* config) {
 
         if (ctx.now_ms - last_media_poll_ms >= MEDIA_POLL_INTERVAL_MS) {
             last_media_poll_ms = ctx.now_ms;
-            if (poll_media(&ctx, current, &media_mounted, &media_invalidated)) {
+            bool media_changed;
+            TD_TIME("media_poll", media_changed = poll_media(&ctx, current, &media_mounted, &media_invalidated));
+            if (media_changed) {
                 power_dialog_open = false;
                 ui_power_dialog_reset(&power_dialog, touch.touched);
                 ui_quick_menu_reset(&s_quick);
@@ -609,6 +842,14 @@ void app_loop_run(const app_loop_config_t* config) {
 
         if (err != ESP_OK) {
             held_key = -1;
+#if CONFIG_TOUCH_DIAG
+            // I2C 出错强杀手势跟踪：单指场景下等价于这次点击报废。
+            // I2C error force-kills tracking: with one finger this forfeits the tap.
+            if (gesture.active) {
+                TD_LOGI("KILL_BY_ERR finger=%d", (int)was_touched);
+                touch_diag_beep();
+            }
+#endif
             cancel_gesture(&ctx, current, &gesture);
             EpdRect dirty;
             ui_power_dialog_cancel_input(&power_dialog, &dirty);
@@ -712,14 +953,8 @@ void app_loop_run(const app_loop_config_t* config) {
                 }
             }
         }
-        if (!power_input_owned && !quick_input_owned && !menu_open && current->on_gesture && err == ESP_OK) {
-            ui_gesture_event_t event;
-            if (ui_gesture_feed(&gesture, &ctx, &event)) {
-                app_redraw_t redraw = current->on_gesture(&ctx, &event);
-                present_page(&ctx, current, &gesture, redraw);
-                if (redraw != APP_REDRAW_NONE) ctx.consumed = true;
-            }
-        }
+        dispatch_gesture_frame(&ctx, current, &gesture, err,
+                               power_input_owned || quick_input_owned || menu_open);
 
         ctx.now_ms = esp_timer_get_time() / 1000;
         rails_idle_check(ctx.now_ms);
@@ -729,7 +964,12 @@ void app_loop_run(const app_loop_config_t* config) {
         if (quick_lock_requested || (read_pico_pmu_ready() && !current->holds_pmu && !usb_storage_active()
             && ctx.now_ms - last_lock_poll_ms >= APP_LOCK_POLL_MS)) {
             last_lock_poll_ms = ctx.now_ms;
-            read_pico_pmu_key_action_t key_action = quick_lock_requested ? READ_PICO_PMU_KEY_SHORT : read_pico_pmu_take_key_action();
+            read_pico_pmu_key_action_t key_action;
+            if (quick_lock_requested) {
+                key_action = READ_PICO_PMU_KEY_SHORT;
+            } else {
+                TD_TIME("pmu_poll", key_action = read_pico_pmu_take_key_action());
+            }
             if (key_action != READ_PICO_PMU_KEY_NONE) {
                 last_input_ms = ctx.now_ms;
                 bool quick_was_open = s_quick.open;
@@ -816,7 +1056,9 @@ void app_loop_run(const app_loop_config_t* config) {
         if (!power_dialog_open && !s_quick.open && !usb_storage_active() && current != &app_transfer &&
             ctx.now_ms - last_font_retry_ms >= FONT_RETRY_INTERVAL_MS) {
             last_font_retry_ms = ctx.now_ms;
-            if (try_load_saved_sd_font(!media_invalidated)) {
+            bool font_ready;
+            TD_TIME("font_retry", font_ready = try_load_saved_sd_font(!media_invalidated));
+            if (font_ready) {
                 held_key = -1;
                 cancel_gesture(&ctx, current, &gesture);
                 ctx.consumed = true;
@@ -866,7 +1108,7 @@ void app_loop_run(const app_loop_config_t* config) {
         const bool wifi_busy = transfer.state != READ_PICO_TRANSFER_STOPPED ||
             pico_online_busy();
         ble_pt_sync(app_settings_ble_turner() && !wifi_busy);
-        ble_pt_poll();
+        TD_TIME("ble_poll", ble_pt_poll());
         if (s_quick.open || quick_input_owned) {
             // 覆盖层期间丢弃页内蓝牙输入，关闭后不重放翻页或学习事件。
             // Discard page BLE input while covered, without replaying turns or learning edges after closing.
@@ -975,6 +1217,15 @@ void app_loop_run(const app_loop_config_t* config) {
                 present_menu(&ctx, current, menu_leaf, &feedback);
             }
         }
+#if CONFIG_TOUCH_DIAG
+        if (ctx.now_ms - td_stats_ms >= 60000) {
+            td_stats_ms = ctx.now_ms;
+            TD_LOGI("STATS press=%u tap=%u swipe=%u long=%u cancel=%u err=%u kill=%u multi=%u stall=%u maxstall=%dms present>100ms=%u maxpresent=%dms replay_evt=%u replay_frames=%u",
+                    td_press, td_tap, td_swipe, td_longp, td_cancel, td_read_err, td_kill_err,
+                    td_multi, td_stall, td_max_stall_ms, td_present_over, td_max_present_ms,
+                    td_replays, td_replay_frames);
+        }
+#endif
         // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
         // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
         vTaskDelay(pdMS_TO_TICKS(!menu_open&&!power_dialog_open&&display_follow_busy()?1:LOOP_TICK_MS));

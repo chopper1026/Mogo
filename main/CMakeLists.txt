@@ -54,6 +54,7 @@ idf_component_register(
         "lock_screen.c"
         "settings.c"
         "app/app_loop.c"
+        "app/touch_sampler.c"
         "app/crash_note.c"
         "app/app_registry.c"
         "ui/ui_kit.c"

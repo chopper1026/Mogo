@@ -17,6 +17,7 @@
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 #define CST836U_REG_TOUCH_DATA 0x00
 #define CST836U_REG_INFO 0xA6
@@ -192,7 +193,15 @@ esp_err_t cst836u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
         }
         err = ESP_ERR_INVALID_RESPONSE;
     }
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+#if CONFIG_TOUCH_DIAG
+        // 计数字节连续 3 次无效：留下原始寄存器，判断是噪声还是固件异常。
+        // Count byte invalid three times in a row: keep raw regs to tell noise from firmware faults.
+        ESP_LOGI(TAG, "TD RAW_INVALID n=0x%02X raw=%02X %02X %02X %02X %02X %02X %02X %02X",
+                 data[2], data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7]);
+#endif
+        return err;
+    }
 
     memset(touch, 0, sizeof(*touch));
     memcpy(touch->raw, data, sizeof(data));

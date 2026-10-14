@@ -106,6 +106,7 @@
 #include <unistd.h>
 
 #include "app.h"
+#include "touch_diag.h"
 #include "app_content_open.h"
 #include "boot_state.h"
 #include "app_registry.h"
@@ -4225,6 +4226,7 @@ static bool reader_turn_chrome(app_ctx_t *ctx) {
     return changed;
 }
 static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
+    TD_LOGI("TURN dir=%d ch=%u pg=%u", dir, (unsigned)s_chapter, (unsigned)s_page);
     if (!s_text || s_clear_confirm) return APP_REDRAW_NONE;
     // 页面图片表可能随跨章加载替换，旧页资格以实际成功显示的画面为准。
     // Chapter loads may replace the image table; the old-page eligibility comes from the displayed frame.
@@ -4252,7 +4254,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     s_reader_cleanup = full_pages > 0 && s_turns >= full_pages;
     if (s_reader_cleanup) s_turns = 0;
     if (s_unsaved < 8) ++s_unsaved;
-    if (s_unsaved >= 8 && !s_save_failed) save_progress();
+    if (s_unsaved >= 8 && !s_save_failed) TD_TIME("save_progress", save_progress());
     ESP_LOGI(TAG, "turn chapter=%u page=%u/%u pct=%u", (unsigned)s_chapter, (unsigned)s_page + 1, (unsigned)book_layout_page_count(), percent(s_page));
     // 预渲染未命中时也使用 GL16；到达设定页数后在本次翻页整屏全刷。
     // A cache miss still uses GL16; the selected turn count triggers a full-screen refresh on this turn.
@@ -5389,9 +5391,26 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         EpdRect tap_area = body_rect();
         if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
+#if CONFIG_TOUCH_DIAG
+        bool td_pen = s_reader_tap.pending;      // 本击前已挂起的中间区点击 / pending center tap before this one
+        int td_pen_dir = s_reader_tap.direction;
+#endif
         int target = book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
                                          app_settings_reader_vertical_turn(),
                                          app_settings_book_vertical(), ctx->now_ms);
+#if CONFIG_TOUCH_DIAG
+        {
+            bool center = book_reader_center(tap_area, x, y);
+            TD_LOGI("TAPZ %s out=%d pen=%d->%d olddir=%d", center ? "center" : "side",
+                    target, (int)td_pen, (int)s_reader_tap.pending, td_pen_dir);
+            // 挂起被冲销且不是双击：旧的那次中间区点击永远丢了。
+            // Pending consumed without a double-tap: the earlier center tap is lost for good.
+            if (td_pen && !s_reader_tap.pending && target != BOOK_READER_TAP_FULLSCREEN) {
+                TD_LOGI("PENDING_DROP out=%d", target);
+                touch_diag_beep();
+            }
+        }
+#endif
         if (target == BOOK_READER_TAP_FULLSCREEN) return toggle_reader_fullscreen(ctx);
         if (target) return turn_page(ctx, target);
         return APP_REDRAW_NONE;
@@ -6022,9 +6041,12 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     if (s_view != READING || (s_toolbar && s_reader_panel != READER_PANEL_TOOLS) || s_clear_confirm || ctx->consumed) s_reader_tap.pending = false;
     else {
         int tap = book_reader_tap_tick(&s_reader_tap, ctx->now_ms, ctx->touch && ctx->touch->touched);
-        if (tap) return turn_page(ctx, tap);
+        if (tap) {
+            TD_LOGI("PENDING_FLUSH dir=%d", tap);
+            return turn_page(ctx, tap);
+        }
     }
-    track_ticket_stats(ctx);
+    TD_TIME("ticket", track_ticket_stats(ctx));
     if (s_view == SEARCH || s_view == EDIT) {
         if (ctx->consumed) return APP_REDRAW_NONE;
         bool held = !ctx->released && ctx->touch && ctx->touch->touched && ctx->touch->count == 1;

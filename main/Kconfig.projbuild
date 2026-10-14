@@ -1,0 +1,23 @@
+# 触摸丢点诊断开关；仅排查构建启用，正式版保持关闭。
+# Touch tap-drop diagnostics; enable only on investigation builds.
+menu "Touch diagnostics"
+
+    config TOUCH_DIAG
+        bool "Enable touch tap-drop diagnostics logging"
+        default n
+        help
+            阅读翻页偶发无响应排查用：在触摸输入链路（app_loop / ui_gesture /
+            app_book / cst836u）输出单行事件日志、阻塞窗口与统计汇总。
+            Investigation aid for sporadic dropped page-turn taps: one-line
+            event logs, stall windows and stats on the touch input chain.
+
+    config TOUCH_DIAG_BEEP
+        bool "Beep when an input event is discarded without action"
+        depends on TOUCH_DIAG
+        default n
+        help
+            手势被取消或双击挂起被冲销时短鸣一声，便于不接串口时统计丢失率。
+            Short beep when a gesture is cancelled or a pending double-tap is
+            dropped, so drop rates can be counted without a serial console.
+
+endmenu

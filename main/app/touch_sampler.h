@@ -1,0 +1,40 @@
+#pragma once
+// F4 触摸采样任务：主循环被刷屏等阻塞期间持续采样 CST836U，帧入 SPSC 环形队列；
+// 主循环恢复后排空回放，触摸边沿不丢。设计与验证规程见
+// docs/local/2026-10-14-f4-touch-sampler-plan.md。
+// / F4 touch sampler task: keeps sampling the CST836U while the main loop is
+// blocked (refresh etc.), pushing frames into an SPSC ring; the loop drains and
+// replays them on wake so press/release edges survive. See the F4 plan doc.
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "cst836u.h"
+
+// 单帧 8 字节：手势机与去抖全部以 ms 粒度工作（长按 500ms、双击窗口 340ms 均用
+// ctx.now_ms），µs 精度无消费者。t_ms 取 esp_timer 毫秒的低 32 位，49.7 天回绕
+// 对存活期仅毫秒级的队列无害（回放值在回绕点两侧仍单调，手势机倒退保护不触发）。
+// / 8-byte frame: every consumer works at ms granularity. t_ms is the low 32
+// bits of esp_timer ms; the 49.7-day wrap is benign for millisecond-lived queues.
+typedef struct {
+    uint32_t t_ms;
+    uint16_t x;
+    uint16_t y;
+    uint8_t count;
+    uint8_t touched;
+} touch_frame_t;
+
+// 启动采样任务（core 1 / prio 4 / 5ms 节拍）。false = 创建失败，主循环回退直读。
+// / Start the sampler task (core 1, prio 4, 5ms tick). false = creation failed;
+// the main loop falls back to direct cst836u_read.
+bool touch_sampler_start(cst836u_handle_t tp);
+
+// 任务是否在跑（决定主循环走队列还是直读）。/ Whether the sampler task is live.
+bool touch_sampler_active(void);
+
+// 当前积压帧数（读者视角，含覆盖钳制）。/ Frames buffered, reader's view.
+unsigned touch_sampler_pending(void);
+
+// 非阻塞弹出一帧；false = 队列空。仅主循环（唯一读者）调用。
+// / Non-blocking pop; false when empty. Main loop is the only reader.
+bool touch_sampler_pop(touch_frame_t* out);
