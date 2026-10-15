@@ -7,6 +7,8 @@
  * English: The built-in Source Han Sans face is the default; the SD face fills missing glyphs and explicit choices override it.
  * 用户修订：票根始终借用系统字体，浅睡解锁恢复锁屏前的实际字体和上下文，不覆盖保存的选择。
  * User revision: tickets always borrow the system face; light-sleep wake restores the actual previous face/context without altering saved choices.
+ * 用户修订：已装载同路径字体时先跳过卡上 stat，瞬时读错误不再把阅读页换成内建字体。
+ * User revision: an already-loaded same-path face skips the card stat, so a transient read error can no longer swap the reading page to the built-in face.
  */
 #include "app_font_context.h"
 #include <stdio.h>
@@ -40,6 +42,12 @@ static const char* system_path(char fallback[TTF_FONT_PATH_MAX]) {
 }
 
 static bool activate(const char* path) {
+    // 已装载同路径就不再碰卡：周期性重试每次 stat 都是一次 SD 读，读错的那个周期
+    // 会把阅读页静默换成内建字体。字体未装载或要换目标时才做校验。
+    // Skip the card when the same face is already loaded: every periodic retry does a stat,
+    // and one failed read silently swapped the reading page to the built-in face. Validate
+    // only when nothing is loaded or the target differs.
+    if (ttf_font_ready() && !strcmp(ttf_font_path(), path)) return false;
     struct stat st = {0};
     bool builtin = ttf_font_path_is_builtin(path);
     bool valid = builtin || font_file(path, &st);
