@@ -520,11 +520,11 @@ int main(void) {
     assert(marks.count==0);
     EpdRect reading_body=reader_area(), text_body=body_rect(), reading_footer=progress_rect();
     assert(reading_body.y>=160&&reading_body.y%32==0);
-    assert(text_body.y==188&&text_body.y>=reading_body.y);
-    assert(reading_body.y+reading_body.height==UI_BAR_TOP+8);
+    assert(text_body.y==176&&text_body.y>=reading_body.y);
+    assert(reading_body.y+reading_body.height==UI_BAR_TOP+39);
     assert(text_body.y+text_body.height==reading_body.y+reading_body.height);
     assert(reading_body.y+reading_body.height<=reading_footer.y+16);
-    assert(reading_footer.y==UI_BAR_TOP&&reading_footer.height==UI_BAR_H);
+    assert(reading_footer.y==UI_BAR_TOP+39&&reading_footer.height==UI_BAR_H-39);
     assert(reading_footer.x==36&&reading_footer.width==612);
     s_reader_fullscreen=true;
     reading_body=reader_area();

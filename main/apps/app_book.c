@@ -445,18 +445,20 @@ static void lock_draw(void) { if (s_draw_lock) xSemaphoreTake(s_draw_lock, portM
 static void unlock_draw(void) { if (s_draw_lock) xSemaphoreGive(s_draw_lock); }
 static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
-// 正文上方留出一致的呼吸空间，下沿靠近进度区；两种模式共用排版与刷新边界。
-// Give the body a consistent top inset and extend it toward the progress strip in both modes.
-// 状态栏隐藏时正文上沿收到 80：全屏贴顶，带头部时头部整体上移让出空间。
-// With the status bar hidden the body inset tightens to 80: flush at the top in full screen,
-// and under the shifted-up header in windowed mode.
+// 正文上方留出一致的呼吸空间，下沿与页脚带同步贴底；两种模式共用排版与刷新边界。
+// Give the body a consistent top inset and extend it toward the footer band in both modes.
+// 带头部时正文顶在页眉分隔线（158/状态栏关 78）下 18px；正文底 = UI_BAR_TOP+39 = 1135，
+// 与页脚差分带（progress_rect）上沿衔接，进度条距正文保持 8px。
+// In windowed mode the body starts 18 px below the header rule (158, or 78 with the status bar
+// hidden); the body bottom at UI_BAR_TOP+39 = 1135 meets the footer band's top edge, keeping the
+// 8 px body-to-bar gap.
 static EpdRect reader_area(void) {
     const int top = s_reader_fullscreen
         ? (app_settings_reader_statusbar() ? 80 : 0)
         : (app_settings_reader_statusbar() ? 160 : 80);
     // 全屏进度线单独差分，翻页时不让正文刷新反复驱动整条横线。
     // Keep the full-screen progress strip out of body updates so turns do not drive the whole bar.
-    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 8;
+    const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 39;
     return (EpdRect){0, top, UI_LOCK_WIDTH, bottom - top};
 }
 static EpdRect reader_fullscreen_progress_area(void) {
@@ -466,10 +468,10 @@ static EpdRect reader_fullscreen_progress_area(void) {
 static EpdRect body_rect_for_tracking(int tracking_index) {
     int top = s_reader_fullscreen
         ? (app_settings_reader_statusbar() ? 96 : 24)
-        : (app_settings_reader_statusbar() ? 188 : 108);
+        : (app_settings_reader_statusbar() ? 176 : 96);
     int margin = s_margin;
     // Leave only a narrow strip for the full-book progress line in full screen.
-    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 8;
+    int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 39;
     int tracking = (tracking_index - 2) * 2;
     // 竖排把「边距」放到上下两端，左右只留一条窄边；整字收齐的是列高，不是行宽。
     // Vertical setting moves the margin setting to the top and bottom edges, keeps a narrow side
@@ -527,8 +529,16 @@ static int reader_margin_for_level(int level, int current, int px, int tracking_
 }
 static EpdRect progress_rect(void) {
     // 阅读页没有右侧菜单按钮；进度信息应和页眉分隔线一样铺满内容宽度。
+    // 页脚整体贴底：带上沿 = 正文底（UI_BAR_TOP+39=1135），高 57 到 1192。进度条 =
+    // track.y+8（1143–1155），章节名行顶 = track.y+27（行底约 1186，距屏底 30px），条距
+    // 正文保持 8px。正文底、页脚刷新带、绘制基准共用本矩形；39 为页脚贴底下调量，
+    // 调整时须与 reader_area/body_rect_for_tracking 的 bottom 三处联动。
     // The reader has no right-hand menu button; the footer spans the full content width.
-    return (EpdRect){36, UI_BAR_TOP, UI_LOCK_WIDTH - 72, UI_BAR_H};
+    // The whole footer hugs the bottom edge: band top = body bottom (1135), height 57 to 1192;
+    // bar at track.y+8 (1143–1155), chapter text top at track.y+27 (bottom ≈1186, 30 px above
+    // the screen edge), keeping the 8 px body-to-bar gap. Body bottom, refresh band and drawing
+    // origin share this rect; 39 is the footer drop — keep the two bottoms above in sync.
+    return (EpdRect){36, UI_BAR_TOP + 39, UI_LOCK_WIDTH - 72, UI_BAR_H - 39};
 }
 static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style() == 5 ? 4 : BOOK_GRID_ROWS; }
 #define SHELF_BOOK_LIFT_PX 16
@@ -2583,17 +2593,20 @@ static void draw_reader_header(uint8_t *fb) {
     // 状态栏隐藏时头部整体上移 80px 贴顶；返回键、书名与收藏共用中心线随平移保持对齐。
     // With the status bar hidden the header shifts up 80 px to the top edge; back, title and
     // favorite keep their shared centerline under the shift.
+    // 中心线 y=121（状态栏底 80 下 41px）；分隔线 158，正文顶在其下 18px。
+    // Centerline y=121 (41 px below the status bar's bottom edge at 80); rule at 158 with the
+    // body starting 18 px below it.
     const int dy = app_settings_reader_statusbar() ? 0 : -80;
-    ui_nav_back(fb, 36, 79 + dy);
+    ui_nav_back(fb, 36, 86 + dy);
     char header[128];
     const char *sample = s_book_title[0] ? s_book_title : s_title;
     copy_text(header, sizeof(header), sample);
     int title_px = ui_text_title_fit(header, 32, 450, sample);
     // 返回键、书名与收藏使用同一视觉中心线；字体切换不改变对齐。
     // Back, title and favorite share one visual centerline across font changes.
-    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 114 + dy, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
-    draw_favorite_icon(fb, 605, 96 + dy, 30, 36, s_reader_favorite, 0x38);
-    ui_hairline(fb, 151 + dy, 36, 612, UI_GRAY_LIGHT);
+    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 121 + dy, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
+    draw_favorite_icon(fb, 605, 103 + dy, 30, 36, s_reader_favorite, 0x38);
+    ui_hairline(fb, 158 + dy, 36, 612, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
 // 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
@@ -2801,7 +2814,11 @@ static void draw_reader(uint8_t* fb, size_t page) {
         if (track.width) ui_fill_round_rect(fb, track, 1, UI_GRAY_BLACK);
     } else {
         EpdRect track = progress_rect();
-        EpdRect bar = {track.x, track.y + 16, track.width, 12};
+        // 带内布局：条顶 track.y+8（距正文底 8px），章节名行顶 track.y+27；条与文字 7px
+        // 间隙，均落在 progress_rect 差分带内。
+        // In-band layout: bar top at track.y+8 (8 px below the body), text top at track.y+27;
+        // the 7 px bar-to-text gap stays inside the footer diff band.
+        EpdRect bar = {track.x, track.y + 8, track.width, 12};
         ui_fill_round_rect(fb, bar, 5, UI_GRAY_LIGHT);
         bar.width = bar.width * (int)percent(page) / 100;
         if (bar.width) ui_fill_round_rect(fb, bar, 5, UI_GRAY_BLACK);
@@ -2818,8 +2835,8 @@ static void draw_reader(uint8_t* fb, size_t page) {
                        track.width - ui_text_fixed_width_px(footer_px, progress) - 16);
         // 页码和全书进度靠右固定，长章节名仅截短左侧；字号不跟随正文设置。
         // Keep page and book progress right-aligned; trim only long chapter titles and ignore body font settings.
-        ui_text_fixed(fb, track.x, track.y + 35, footer_px, chapter_line, EPD_DRAW_ALIGN_LEFT, false);
-        ui_text_fixed(fb, track.x + track.width, track.y + 35, footer_px,
+        ui_text_fixed(fb, track.x, track.y + 27, footer_px, chapter_line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text_fixed(fb, track.x + track.width, track.y + 27, footer_px,
                       progress, EPD_DRAW_ALIGN_RIGHT, false);
     }
     if (s_reader_notice[0]) {
@@ -5389,9 +5406,9 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         // 页头热区与绘制共用同一偏移；状态栏隐藏时上移 80px。
         // Header hit zones share the drawing offset; shifted up 80 px with the status bar hidden.
         const int header_dy = app_settings_reader_statusbar() ? 0 : -80;
-        if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 75 + header_dy, 64, 64}, x, y))
+        if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 82 + header_dy, 64, 64}, x, y))
             return reader_return(ctx, false);
-        if (!s_reader_fullscreen && x >= 584 && y >= 76 + header_dy && y < 145 + header_dy) {
+        if (!s_reader_fullscreen && x >= 584 && y >= 83 + header_dy && y < 152 + header_dy) {
             bool next = !s_reader_favorite;
             if (!favorite_save(s_path, next)) {
                 copy_text(s_reader_notice, sizeof(s_reader_notice), "收藏保存失败");
@@ -5403,10 +5420,10 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
                 if (!strcmp(s_shelf[i].path, s_path)) s_shelf[i].favorite = next;
             sort_shelf(ctx);
             render(ctx, ctx->fb);
-            // 局部刷新区钳到屏内：上移后 76+dy 为负，收缩高度保持覆盖收藏图标。
-            // Clamp the partial-refresh rect on screen: 76+dy goes negative once shifted;
+            // 局部刷新区钳到屏内：上移后 83+dy 为负，收缩高度保持覆盖收藏图标。
+            // Clamp the partial-refresh rect on screen: 83+dy goes negative once shifted;
             // shrink the height so the favorite icon stays covered.
-            const int fav_top = 76 + header_dy;
+            const int fav_top = 83 + header_dy;
             s_area = (EpdRect){584, fav_top < 0 ? 0 : fav_top, 64, fav_top < 0 ? 70 + fav_top : 70};
             s_mode = MODE_GL16;
             return APP_REDRAW_AREA;
