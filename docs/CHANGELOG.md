@@ -3,6 +3,11 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
+## 未发布 / Unreleased
+
+- 阅读页眉去掉返回键与收藏图标：书名移到左侧，右侧改为状态栏同款的时间与电池，翻页正文位置不变。三键自定义新增「返回」动作，按进入阅读的来路回退（首页最近阅读回首页，书架回书架，默认键位不变），整本收藏的开关移到书架长按「图书详情」，收藏置顶与封面角标保持原有行为。
+  The reader header drops its back and favorite controls: the title moves left and the right side shows the status-bar clock and battery, with the body position unchanged. Key actions gain "back", which undoes the entry into reading (home recent-reading returns home, the shelf returns to the shelf; defaults untouched), and the whole-book favorite toggle now lives in the shelf details panel while favorite-first sorting and cover badges keep working.
+
 ## 0.3.3-rc92 / 2026-10-14
 
 - 首页新增 Moon、Kehai、Cat、Dali、Asterisk、小屋时钟与最近阅读书夹，保留 IKEA PS1995；长按选择样式，单击打开对应时间页或书架。阅读记录新增月历、每日目标与“已闭环”。

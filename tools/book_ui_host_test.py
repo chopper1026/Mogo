@@ -122,6 +122,12 @@ static char test_favorite_key[11];
 static int nvs_open(const char* ns,int mode,nvs_handle_t* out){(void)mode;*out=!strcmp(ns,SHELF_HIDDEN_NS)?2:1;return ESP_OK;}
 static void nvs_close(nvs_handle_t h){(void)h;}
 static int nvs_get_u8(nvs_handle_t h,const char* key,uint8_t* out){if(h==1&&!strcmp(key,test_favorite_key)){*out=1;return ESP_OK;}return ESP_ERR_NVS_NOT_FOUND;}
+static int test_favorite_set_error;
+static int nvs_set_u8(nvs_handle_t h,const char* key,uint8_t value){
+    assert(h==1);if(test_favorite_set_error)return test_favorite_set_error;
+    if(value==1)test_favorite_key[0]=1;else if(!strcmp(key,test_favorite_key))test_favorite_key[0]=0;
+    return ESP_OK;
+}
 static int nvs_get_str(nvs_handle_t h,const char* key,char* out,size_t* len){
     assert(h==2);
     for(int i=0;i<test_hidden_count;i++)if(!strcmp(key,test_hidden[i].key)){
@@ -142,7 +148,7 @@ static int nvs_erase_key(nvs_handle_t h,const char* key){
     }
     return ESP_ERR_NVS_NOT_FOUND;
 }
-static int nvs_commit(nvs_handle_t h){assert(h==2);return ESP_OK;}
+static int nvs_commit(nvs_handle_t h){assert(h==1||h==2);return ESP_OK;}
 static shelf_entry_t* s_shelf;
 static size_t s_shelf_capacity;
 static int s_count,s_visible_count;
@@ -400,7 +406,7 @@ static char s_category_root[288];
 unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -667,7 +673,7 @@ int main(void) {
     assert(bulk_turn_page(&ctx,-1)==APP_REDRAW_NONE);
     s_scan_pending=true;assert(bulk_turn_page(&ctx,1)==APP_REDRAW_NONE);s_scan_pending=false;
         ctx.leaf=3;s_view=MANAGE;s_clear_confirm=false;s_file_removed=false;
-    EpdRect back=manage_rect(0,3);manage_action(&ctx,back.x+1,back.y+1);
+    EpdRect back=manage_rect(0,4);manage_action(&ctx,back.x+1,back.y+1);
     assert(s_view==SHELF&&ctx.leaf==3);
     EpdRect circle=manage_back_rect();assert(circle.y==92&&circle.height==44);
     EpdRect filter=bulk_filter_rect(1);assert(filter.y==216&&filter.height==70);
@@ -692,7 +698,7 @@ int main(void) {
     s_text=NULL;retry_progress();assert(!strcmp(test_last_path,s_path)&&!s_save_failed);
     strcpy(s_managed.path,s_path);s_view=MANAGE;s_delete_confirm=true;s_clear_confirm=true;
     EpdRect cancel=manage_rect(0,2);manage_action(&ctx,cancel.x+1,cancel.y+1);assert(!s_clear_confirm&&test_delete_calls==0);
-    EpdRect del=manage_rect(2,3);manage_action(&ctx,del.x+1,del.y+1);assert(s_clear_confirm&&s_delete_confirm&&test_delete_calls==0);
+    EpdRect del=manage_rect(3,4);manage_action(&ctx,del.x+1,del.y+1);assert(s_clear_confirm&&s_delete_confirm&&test_delete_calls==0);
     test_removed=false;test_delete_error=-1;manage_apply(&ctx);assert(s_view==MANAGE&&!s_file_removed&&s_manage_message[0]);
     test_removed=true;manage_apply(&ctx);assert(s_view==MANAGE&&s_file_removed&&test_notify_count==1&&!pending_find(s_managed.path));assert(s_store_revision==book_store_revision());
     test_forget_error=-1;manage_apply(&ctx);assert(s_view==MANAGE&&test_notify_count==1);
@@ -822,7 +828,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"
     c.write_text(unit, encoding="utf-8")
-    subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
-                    "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
+    subprocess.run(["gcc", "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
+                    "-Wno-unused-function",  "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
                     str(c), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

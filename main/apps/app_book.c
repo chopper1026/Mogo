@@ -93,6 +93,8 @@
  * Latest user revision: book/chapter titles reuse the current reader face at the original 32/48px; Home uses its active system face, never retaining both fonts.
  * 用户确认：题头下拉选择 books 子目录，各类别/布局记住页码；去掉题头横线，主体在确认位置基础上下移8px。
  * User approval: choose books subfolders in the title menu, retain per-category/layout pages, remove the header rule and lower the approved body by 8px.
+ * 用户修订：页眉去掉返回钮与收藏图标，书名左置；右侧改画状态栏同款时间与电池；三键新增「返回」动作（按来路回退），收藏开关移到书架详情页。
+ * User revision: drop the header back/favorite controls and left-align the title; the right side draws the status-bar clock and battery; key actions gain "back" (undoing the entry path) and the favorite toggle moves to the shelf details panel.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -251,7 +253,6 @@ static const char *shelf_category_name(int index);
 static bool shelf_category_matches(const char *path);
 static int shelf_category_add(const char *path);
 static app_redraw_t shelf_category_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev);
-static bool s_reader_favorite;
 static shelf_entry_t s_managed;
 static bool s_delete_confirm, s_file_removed;
 static char s_shelf_warning[128], s_manage_message[128];
@@ -1293,9 +1294,10 @@ static void draw_manage(uint8_t* fb) {
         draw_control(fb, manage_rect(1, 2), "重试清理", 403);
     } else {
         draw_control(fb, (EpdRect){UI_MARGIN, panel.y + panel.height - 190, ui_content_width(), 68}, "前往文件管理重命名", 404);
-        draw_control(fb, manage_rect(0, 3), "关闭", 400);
-        draw_control(fb, manage_rect(1, 3), "清进度", 401);
-        draw_control(fb, manage_rect(2, 3), "删除文件", 402);
+        draw_control(fb, manage_rect(0, 4), "关闭", 400);
+        draw_control(fb, manage_rect(1, 4), s_managed.favorite ? "取消收藏" : "收藏", 406);
+        draw_control(fb, manage_rect(2, 4), "清进度", 401);
+        draw_control(fb, manage_rect(3, 4), "删除文件", 402);
     }
 }
 
@@ -1542,13 +1544,6 @@ static bool favorite_read_handle(nvs_handle_t h, const char *path) {
     uint8_t value = 0;
     char key[11]; favorite_key(path, key);
     return nvs_get_u8(h, key, &value) == ESP_OK && value == 1;
-}
-static bool favorite_load(const char *path) {
-    nvs_handle_t h;
-    if (nvs_open("rp_favs", NVS_READONLY, &h) != ESP_OK) return false;
-    bool value = favorite_read_handle(h, path);
-    nvs_close(h);
-    return value;
 }
 static bool favorite_save(const char *path, bool value) {
     nvs_handle_t h;
@@ -2302,7 +2297,7 @@ static void draw_turn_settings(uint8_t *fb) {
 }
 
 static const char *reader_key_label(app_reader_key_action_t action) {
-    static const char *const labels[] = {"上一页", "下一页", "阅读工具栏", "切换全屏", "返回首页", "手动全刷", "不操作"};
+    static const char *const labels[] = {"上一页", "下一页", "阅读工具栏", "切换全屏", "返回首页", "手动全刷", "不操作", "返回"};
     return labels[action >= 0 && action < APP_READER_KEY_COUNT ? action : APP_READER_KEY_NONE];
 }
 static EpdRect reader_key_card(unsigned key) { return (EpdRect){36 + (int)key * 208, 506, 196, 114}; }
@@ -2358,7 +2353,7 @@ static void draw_key_picker(uint8_t *fb) {
     draw_sheet(fb, 270, titles[s_reader_key_pick < 4 ? s_reader_key_pick : 0]);
     draw_sheet_back(fb, 270);
     for (int i = 0; i < APP_READER_KEY_COUNT; ++i) {
-        EpdRect card = {36, 390 + i * 94, 612, 78};
+        EpdRect card = {36, 390 + i * 88, 612, 78};
         bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action() : app_settings_reader_key_action(s_reader_key_pick)) == i;
         ui_fill_round_rect(fb, card, 20, selected ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
@@ -2593,22 +2588,30 @@ static uint8_t inline_ink_gray(uint8_t gray) {
 }
 
 static void draw_reader_header(uint8_t *fb) {
-    // 状态栏隐藏时头部整体上移 80px 贴顶；返回键、书名与收藏共用中心线随平移保持对齐。
-    // With the status bar hidden the header shifts up 80 px to the top edge; back, title and
-    // favorite keep their shared centerline under the shift.
+    // 状态栏隐藏时头部整体上移 80px 贴顶；书名、时间与电池共用中心线随平移保持对齐。
+    // With the status bar hidden the header shifts up 80 px to the top edge; title, clock and
+    // battery keep their shared centerline under the shift.
     // 中心线 y=121（状态栏底 80 下 41px）；分隔线 158，正文顶在其下 18px。
     // Centerline y=121 (41 px below the status bar's bottom edge at 80); rule at 158 with the
     // body starting 18 px below it.
     const int dy = app_settings_reader_statusbar() ? 0 : -80;
-    ui_nav_back(fb, 36, 86 + dy);
+    // 右侧为状态栏同款电池（左沿 606），时间 28px 右对齐于电池左 12px；书名 36 起左排，
+    // 可用宽度按时间实测宽度收缩，长书名先于时间截断。
+    // The right side holds the status-bar battery (left edge 606) with the 28 px clock right
+    // aligned 12 px before it; the title starts at 36 and yields width to the measured clock.
+    char clock[12];
+    ui_nav_clock_text(clock, sizeof(clock));
+    const int clock_width = ui_text_fixed_width_px(UI_STATUS_TIME_PX, clock);
+    const int clock_right = 606 - 12;
     char header[128];
     const char *sample = s_book_title[0] ? s_book_title : s_title;
     copy_text(header, sizeof(header), sample);
-    int title_px = ui_text_title_fit(header, 32, 450, sample);
-    // 返回键、书名与收藏使用同一视觉中心线；字体切换不改变对齐。
-    // Back, title and favorite share one visual centerline across font changes.
-    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 121 + dy, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
-    draw_favorite_icon(fb, 605, 103 + dy, 30, 36, s_reader_favorite, 0x38);
+    int title_px = ui_text_title_fit(header, 32, clock_right - clock_width - 36, sample);
+    // 书名与时间、电池共用同一视觉中心线；字体切换不改变对齐。
+    // Title, clock and battery share one visual centerline across font changes.
+    ui_text_title_vc(fb, 36, 121 + dy, title_px, header, sample, EPD_DRAW_ALIGN_LEFT);
+    ui_text_fixed_vc(fb, clock_right, 121 + dy, UI_STATUS_TIME_PX, clock, EPD_DRAW_ALIGN_RIGHT, false);
+    ui_nav_battery_draw(fb, 606, 121 + dy);
     ui_hairline(fb, 158 + dy, 36, 612, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
@@ -2977,14 +2980,27 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     if (s_category_menu) draw_category_menu(fb);
     unlock_draw();
 }
-static EpdRect reader_status_area(void) { return (EpdRect){0,0,UI_LOCK_WIDTH,80}; }
+static EpdRect reader_status_area(void) {
+    // 时钟重刷带：全屏只有状态栏 80px；窗口化状态栏开时页眉带（80..159，含分隔线）
+    // 也有时钟，合并为 160px；状态栏关时页眉贴顶只占 80px。160 不触及正文顶 176。
+    // Clock refresh band: full screen keeps the 80 px status alone; windowed with the status
+    // bar on merges the header band (80..159, rule included) into 160 px, and with the status
+    // bar hidden the top-hugging header fits 80 px. 160 never reaches the body top at 176.
+    if (!s_reader_fullscreen)
+        return (EpdRect){0, 0, UI_LOCK_WIDTH, app_settings_reader_statusbar() ? 160 : 80};
+    return (EpdRect){0, 0, UI_LOCK_WIDTH, 80};
+}
 static bool reader_status_visible(void) {
-    return s_view==READING && s_text && app_settings_reader_statusbar();
+    // 窗口化页眉常驻时钟，全屏只有状态栏开档才有时间显示。
+    // The windowed header always shows the clock; full screen only with the status bar on.
+    return s_view==READING && s_text &&
+        (app_settings_reader_statusbar() || !s_reader_fullscreen);
 }
 static void reader_status_paint(uint8_t *fb) {
     EpdRect area=reader_status_area();
     epd_fill_rect(area,UI_GRAY_WHITE,fb);
-    ui_nav_status(fb);
+    if (app_settings_reader_statusbar()) ui_nav_status(fb);
+    if (!s_reader_fullscreen) draw_reader_header(fb);
     if (s_reader_panel!=READER_PANEL_BACKGROUND_PREVIEW && app_settings_book_background_path()[0])
         ui_reader_background_paint(fb,area,true);
 }
@@ -3245,7 +3261,6 @@ static void free_book(void) {
     s_jump_offset = SIZE_MAX;
     book_close();
     s_path[0] = 0;
-    s_reader_favorite = false;
     s_book_title[0] = 0;
     app_font_activate_system();
 }
@@ -3636,7 +3651,6 @@ static bool open_book_impl(app_ctx_t* ctx, const char* path) {
         return false;
     }
     copy_text(s_path, sizeof(s_path), path);
-    s_reader_favorite = favorite_load(path);
     const char* filename = strrchr(path, '/');
     filename = filename ? filename + 1 : path;
     if (!book_title_from_path(path, s_book_title, sizeof(s_book_title)))
@@ -4806,7 +4820,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         else if (ui_rect_hit((EpdRect){36, 299, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
             s_reader_panel = picker ? READER_PANEL_KEY_SETTINGS : READER_PANEL_REFRESH_SETTINGS;
         else if (picker) {
-            for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit((EpdRect){36, 390 + i * 94, 612, 78}, x, y)) {
+            for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit((EpdRect){36, 390 + i * 88, 612, 78}, x, y)) {
                 if (!app_settings_reader_key_action_allowed(s_reader_key_pick, i)) {
                     copy_text(s_reader_key_error, sizeof(s_reader_key_error), "请先将另一个按键设为阅读工具栏");
                     return APP_REDRAW_PAGE;
@@ -5113,12 +5127,25 @@ static app_redraw_t manage_action(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         ui_nav_request(ctx, 2);
         return APP_REDRAW_NONE;
     }
-    int count = s_clear_confirm || s_file_removed ? 2 : 3;
+    int count = s_clear_confirm || s_file_removed ? 2 : 4;
     for (int i = 0; i < count; ++i) if (ui_rect_hit(manage_rect(i, count), x, y)) {
         if (s_clear_confirm) { if (!i) s_clear_confirm = false; else manage_apply(ctx); }
         else if (!i) s_view = SHELF;
         else if (s_file_removed) manage_apply(ctx);
-        else { s_clear_confirm = true; s_delete_confirm = i == 2; s_manage_message[0] = 0; }
+        else if (i == 1) {
+            // 收藏开关与封面角标、收藏置顶共用一份 NVS 数据，保存后即时重排。
+            // The favorite toggle shares the NVS data behind cover badges and favorite-first
+            // sorting, resorting the shelf as soon as the save succeeds.
+            if (!favorite_save(s_managed.path, !s_managed.favorite)) {
+                copy_text(s_manage_message, sizeof(s_manage_message), "收藏保存失败");
+            } else {
+                s_managed.favorite = !s_managed.favorite;
+                for (int n = 0; n < s_count; ++n)
+                    if (!strcmp(s_shelf[n].path, s_managed.path)) s_shelf[n].favorite = s_managed.favorite;
+                sort_shelf(ctx);
+            }
+        }
+        else { s_clear_confirm = true; s_delete_confirm = i == 3; s_manage_message[0] = 0; }
         break;
     }
     return APP_REDRAW_PAGE;
@@ -5409,31 +5436,9 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (s_view == READING) {
         if (s_toolbar && !(s_reader_panel == READER_PANEL_TOOLS && y < 1096 && ui_rect_hit(body_rect(), x, y)))
             return reader_panel_action(ctx, x, y);
-        // 页头热区与绘制共用同一偏移；状态栏隐藏时上移 80px。
-        // Header hit zones share the drawing offset; shifted up 80 px with the status bar hidden.
-        const int header_dy = app_settings_reader_statusbar() ? 0 : -80;
-        if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 82 + header_dy, 64, 64}, x, y))
-            return reader_return(ctx, false);
-        if (!s_reader_fullscreen && x >= 584 && y >= 83 + header_dy && y < 152 + header_dy) {
-            bool next = !s_reader_favorite;
-            if (!favorite_save(s_path, next)) {
-                copy_text(s_reader_notice, sizeof(s_reader_notice), "收藏保存失败");
-                s_reader_notice_until = esp_timer_get_time() / 1000 + 1800;
-                return APP_REDRAW_PAGE;
-            }
-            s_reader_favorite = next;
-            for (int i = 0; i < s_count; ++i)
-                if (!strcmp(s_shelf[i].path, s_path)) s_shelf[i].favorite = next;
-            sort_shelf(ctx);
-            render(ctx, ctx->fb);
-            // 局部刷新区钳到屏内：上移后 83+dy 为负，收缩高度保持覆盖收藏图标。
-            // Clamp the partial-refresh rect on screen: 83+dy goes negative once shifted;
-            // shrink the height so the favorite icon stays covered.
-            const int fav_top = 83 + header_dy;
-            s_area = (EpdRect){584, fav_top < 0 ? 0 : fav_top, 64, fav_top < 0 ? 70 + fav_top : 70};
-            s_mode = MODE_GL16;
-            return APP_REDRAW_AREA;
-        }
+        // 页眉只显示书名、时间与电池，无控件；点页眉不翻页，落入下方正文热区判定。
+        // The header shows only the title, clock and battery with no controls; header taps do
+        // not turn pages and fall through to the body hit test below.
         // 通栏插图铺满整屏，点在图两侧的边条上同样要翻页；文字页仍按正文栏判定。
         // A full-bleed illustration spans the panel, so taps on its side strips must turn pages
         // too; text pages keep the body column.
@@ -5650,7 +5655,7 @@ static int control_at(app_ctx_t* ctx, uint16_t x, uint16_t y, EpdRect* rect) {
             *rect = (EpdRect){UI_MARGIN, manage_panel().y + manage_panel().height - 190, ui_content_width(), 68};
             if (ui_rect_hit(*rect, x, y)) return 404;
         }
-        int count = s_clear_confirm || s_file_removed ? 2 : 3;
+        int count = s_clear_confirm || s_file_removed ? 2 : 4;
         for (int i = 0; i < count; ++i) {
             *rect = manage_rect(i, count);
             if (ui_rect_hit(*rect, x, y)) return s_clear_confirm ? 300 + i : s_file_removed && i == 1 ? 403 : 400 + i;
@@ -5924,6 +5929,9 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
             s_stats_activity_ms = ctx->now_ms;
             return turn_page(ctx, action == APP_READER_KEY_PREV ? -1 : 1);
         case APP_READER_KEY_HOME: return reader_return(ctx, true);
+        // 「返回」按来路回退：从首页进入的书回首页，其余回书架。
+        // "Back" undoes the entry path: books opened from home go home, others to the shelf.
+        case APP_READER_KEY_SHELF: return reader_return(ctx, false);
         case APP_READER_KEY_FULLSCREEN: return toggle_reader_fullscreen(ctx);
         case APP_READER_KEY_REFRESH: return reader_manual_refresh(ctx);
         case APP_READER_KEY_TOOLS:

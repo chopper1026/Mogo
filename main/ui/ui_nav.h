@@ -11,6 +11,8 @@
 #include "ui_nav_layout.h"
 
 #define UI_NAV_BACK_BORDER_GRAY 0x58
+/// 状态栏与阅读页眉共用的时间字号。/ Shared clock type size for the status bar and reader header.
+#define UI_STATUS_TIME_PX 28
 
 void ui_nav_draw(uint8_t *fb, int active);
 void ui_nav_status(uint8_t *fb);
@@ -19,6 +21,11 @@ void ui_nav_status(uint8_t *fb);
 int64_t ui_nav_clock_minute(void);
 /// 只绘制状态栏时间，供主页面按分钟局部更新。/ Draw only the status clock for local minute updates.
 void ui_nav_clock_draw(uint8_t *fb);
+/// 状态栏同款时间文本，供阅读页眉等自定义位置复用。/ Status-bar clock text for reuse at custom spots such as the reader header.
+void ui_nav_clock_text(char *clock, size_t capacity);
+/// 在 (x,cy) 画状态栏同款电池（含电量填充与充电闪电），x 为电池左沿。
+/// Draw the status-bar battery (fill and charging bolt included) at (x,cy); x is the battery's left edge.
+void ui_nav_battery_draw(uint8_t *fb, int x, int cy);
 /// 绘制设置页与状态栏共用的 WiFi 标志。/ Draw the WiFi mark shared by Settings and the status bar.
 void ui_nav_wifi_icon(uint8_t *fb, int cx, int cy, int size, uint8_t gray);
 /// 二级页面共用的圆形返回按钮。/ Shared circular back control for secondary pages.

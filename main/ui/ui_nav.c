@@ -25,7 +25,6 @@
 #define UI_NAV_BACK_ICON_PX 38
 #define UI_NAV_BOLT_ICON_PX 26
 #define UI_NAV_NETWORK_ICON_PX 28
-#define UI_STATUS_TIME_PX 28
 #define UI_STATUS_PERCENT_PX 28
 #define UI_STATUS_SIGNATURE_PX 26
 
@@ -100,6 +99,28 @@ void ui_nav_clock_draw(uint8_t *fb) {
     char clock[12]; clock_text(clock,sizeof(clock));
     ui_text_fixed_vc(fb,36,40,UI_STATUS_TIME_PX,clock,EPD_DRAW_ALIGN_LEFT,false);
 }
+void ui_nav_clock_text(char *clock, size_t capacity) {
+    clock_text(clock, capacity);
+}
+void ui_nav_battery_draw(uint8_t *fb, int x, int cy) {
+    EpdRect battery = {x, cy - 11, 40, 22};
+    ui_draw_round_rect(fb, battery, 6, UI_GRAY_BLACK);
+    ui_fill_round_rect(fb, (EpdRect){x + 4, cy - 4, 5, 8}, 2, UI_GRAY_BLACK);
+    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    int gauge_percent = pmu_battery_percent(pmu);
+    bool charging = pmu_battery_charging(pmu);
+    if (gauge_percent >= 0) {
+        int width = (31 * gauge_percent + 50) / 100;
+        if (width > 0) ui_fill_round_rect(fb, (EpdRect){x + 4, cy - 7, width, 14}, 4, UI_GRAY_BLACK);
+    }
+    if (charging) {
+        // 闪电只落在深色电量块上：透明像素保留底色，白色墨在浅色区自然消失，
+        // 不必再按电量高低切换墨色。
+        // The bolt shows only over the dark fill: transparent pixels keep the background,
+        // so white ink vanishes on the light part and no SOC-dependent colour is needed.
+        ui_draw_icon(fb, x + 21, cy, UI_NAV_BOLT_ICON_PX, UI_ICON_ZAP, UI_GRAY_WHITE);
+    }
+}
 void ui_nav_status(uint8_t *fb) {
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
     char clock[12]; clock_text(clock,sizeof(clock));
@@ -143,21 +164,7 @@ void ui_nav_status(uint8_t *fb) {
     if (bluetooth_visible)
         ui_draw_icon(fb, bluetooth_center, status_center_y, UI_NAV_NETWORK_ICON_PX,
                      UI_ICON_BLUETOOTH, UI_GRAY_BLACK);
-    EpdRect battery = {606, status_center_y - 11, 40, 22};
-    ui_draw_round_rect(fb, battery, 6, UI_GRAY_BLACK);
-    ui_fill_round_rect(fb, (EpdRect){648, status_center_y - 4, 5, 8}, 2, UI_GRAY_BLACK);
-    bool charging = pmu_battery_charging(pmu);
-    if (gauge_percent >= 0) {
-        int width = (31 * gauge_percent + 50) / 100;
-        if (width > 0) ui_fill_round_rect(fb, (EpdRect){610, status_center_y - 7, width, 14}, 4, UI_GRAY_BLACK);
-    }
-    if (charging) {
-        // 闪电只落在深色电量块上：透明像素保留底色，白色墨在浅色区自然消失，
-        // 不必再按电量高低切换墨色。
-        // The bolt shows only over the dark fill: transparent pixels keep the background,
-        // so white ink vanishes on the light part and no SOC-dependent colour is needed.
-        ui_draw_icon(fb, 627, status_center_y, UI_NAV_BOLT_ICON_PX, UI_ICON_ZAP, UI_GRAY_WHITE);
-    }
+    ui_nav_battery_draw(fb, 606, status_center_y);
     ui_text_fixed_vc(fb, 595, status_center_y, UI_STATUS_PERCENT_PX, percent, EPD_DRAW_ALIGN_RIGHT, false);
 }
 

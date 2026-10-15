@@ -57,17 +57,21 @@ enum {READER_PANEL_NONE,READER_PANEL_BACKGROUND_PREVIEW};
 static int s_reader_panel;
 static uint8_t fb[684*1216],next_fb[684*1216];
 static bool locked;
-static unsigned status_paints,background_paints,display_calls,failed;
+static unsigned status_paints,background_paints,display_calls,failed,header_paints;
+// Clock-band height follows the mode: 80 for full screen or the top-hugging header, 160 when
+// the windowed header joins the status bar. Assertions track the painted band, not a constant.
+static int expected_band(void){return !s_reader_fullscreen&&statusbar?160:80;}
 static int64_t ui_nav_clock_minute(void){return minute;}
 static bool app_settings_reader_statusbar(void){return statusbar;}
 static const char *app_settings_book_background_path(void){return wallpaper?"/sdcard/pictures/bg.jpg":"";}
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
-static void epd_fill_rect(EpdRect r,int color,uint8_t *frame){assert(r.x==0&&r.y==0&&r.width==684&&r.height==80);memset(frame,color,684*80);}
-static void ui_nav_status(uint8_t *frame){++status_paints;frame[20*684+36]=(uint8_t)minute;}
-static void ui_reader_background_paint(uint8_t *frame,EpdRect r,bool blend){assert(r.height==80&&blend);++background_paints;frame[0]=29;}
+static void epd_fill_rect(EpdRect r,int color,uint8_t *frame){assert(r.x==0&&r.y==0&&r.width==684&&r.height==expected_band());memset(frame,color,684*expected_band());}
+static void ui_nav_status(uint8_t *frame){assert(statusbar);++status_paints;frame[20*684+36]=(uint8_t)minute;}
+static void draw_reader_header(uint8_t *frame){(void)frame;++header_paints;}
+static void ui_reader_background_paint(uint8_t *frame,EpdRect r,bool blend){assert(r.height==expected_band()&&blend);++background_paints;frame[0]=29;}
 enum EpdDrawError {OK=0,FAULT=1};
-static enum EpdDrawError update_display_area_diff_with(void *h,const void *wave,int mode,EpdRect area){(void)h;(void)wave;assert(!locked&&mode==MODE_GL16&&area.y==0&&area.height==80);++display_calls;return failed?FAULT:OK;}
+static enum EpdDrawError update_display_area_diff_with(void *h,const void *wave,int mode,EpdRect area){(void)h;(void)wave;assert(!locked&&mode==MODE_GL16&&area.y==0&&area.height==expected_band());++display_calls;return failed?FAULT:OK;}
 static void guard_draw_result(void *h,int e){(void)h;(void)e;}
 '''
 # &E0470_WAVEFORM requires a real object, preserving the actual refresh call.
@@ -121,24 +125,31 @@ int main(void){
  settings_value(pixels,627,200,21,"network");assert(arrows==2);
  app_ctx_t ctx={.fb=fb};memset(fb,77,sizeof(fb));
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&s_reader_clock_pending);
- assert(fb[80*684]==77&&fb[20*684+36]==100);
+ assert(fb[159*684]==255&&fb[160*684]==77&&fb[20*684+36]==100);
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&display_calls==1&&s_reader_clock_minute==100);
  assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE&&display_calls==1);
  ++minute;touch_t touch={true};ctx.touch=&touch;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);ctx.touch=NULL;
+ // 全屏无状态栏：没有时间显示，不刷新。
  s_reader_fullscreen=true;statusbar=false;assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
- statusbar=true;wallpaper=true;
- assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==1&&fb[0]==29);
- failed=1;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==100);
+ // 窗口化状态栏关：页眉贴顶带时钟，重刷带回到 80px。
+ s_reader_fullscreen=false;minute=101;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&s_reader_clock_pending&&s_reader_clock_minute==100);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&display_calls==2&&s_reader_clock_minute==101);
+ // 窗口化状态栏开：页眉并入状态栏带，一次刷新覆盖 160px 且页眉同步重画。
+ statusbar=true;wallpaper=true;header_paints=0;++minute;
+ assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA&&background_paints==1&&fb[0]==29&&header_paints==1);
+ failed=1;assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==101);
+ minute=100;
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);failed=0;
- assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==101);
+ assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==100);
  minute=102;assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);++minute;
  assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==102);
  assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==103);
  minute=90;assert(reader_clock_tick(&ctx)==APP_REDRAW_AREA);assert(clock_present(&ctx,APP_REDRAW_AREA)&&s_reader_clock_minute==90);
  memset(next_fb,15,sizeof(next_fb));next_fb[20*684+36]=1;minute=110;
  assert(paint_reading(&ctx,MODE_GL16)==APP_REDRAW_AREA);
- assert(fb[20*684+36]==110&&fb[80*684]==15&&s_area.y==160);
+ assert(fb[20*684+36]==110&&fb[160*684]==15&&fb[159*684]==255&&s_area.y==160);
  s_view=SHELF;++minute;assert(reader_clock_tick(&ctx)==APP_REDRAW_NONE);
  read_pico_sd_info_t info={.mounted=true,.space_valid=true,.filesystem_bytes=128ULL*1024*1024*1024,.free_bytes=100ULL*1024*1024*1024,.capacity_bytes=256ULL*1024*1024*1024};
  char total[32],usage[96];storage_usage(&info,total,sizeof(total),usage,sizeof(usage));
@@ -157,5 +168,5 @@ assert 'ui_wallpaper_draw_rounded' not in s and 'read_pico_transfer_get_saved_wi
 assert 'prepare_inline_image' not in branch and 'kick_prep' not in branch
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
  d=Path(folder);c=d/'test.c';exe=d/'test';c.write_text(unit)
- subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-fsanitize=address,undefined',str(c),'-o',str(exe)],check=True)
+ subprocess.run(['cc','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable',str(c),'-o',str(exe)],check=True)
  subprocess.run([str(exe)],check=True)

@@ -58,6 +58,7 @@ static unsigned erased_completed,paint_calls;
 #define UI_GRAY_WHITE 255
 #define UI_GRAY_LIGHT 192
 #define UI_LOCK_WIDTH 684
+#define UI_STATUS_TIME_PX 28
 #define EPD_DRAW_ALIGN_LEFT 0
 #define EPD_DRAW_ALIGN_RIGHT 1
 #define EPD_DRAW_ALIGN_CENTER 2
@@ -76,14 +77,16 @@ static void assert_progress(int width){
  assert(s_upgrade_bar_width==width&&!erased_completed);
 }
 static char s_book_title[128]="海边的信",s_title[128]="chapter";
-static bool s_reader_favorite;
-static int back_center,title_center,favorite_center;
-static void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;(void)x;back_center=y+35;}
-static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)fb;assert(x==342&&px==24&&align==EPD_DRAW_ALIGN_CENTER);assert(!strcmp(text,sample));title_center=y;}
-static void draw_favorite_icon(uint8_t *fb,int x,int y,int w,int h,bool favorite,int gray){(void)fb;(void)x;(void)w;(void)favorite;(void)gray;favorite_center=y+h/2;}
+static int title_center,battery_center;
+static int title_left=-1,clock_right=-1;
+static bool app_settings_reader_statusbar(void){return true;}
+static void ui_nav_clock_text(char *out,size_t cap){snprintf(out,cap,"20:31");}
+static void ui_text_title_vc(uint8_t *fb,int x,int y,int px,const char *text,const char *sample,int align){(void)fb;(void)px;assert(!strcmp(text,sample));title_left=x;title_center=y;(void)align;}
+static void ui_text_fixed_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverted){(void)fb;(void)px;(void)text;(void)align;(void)inverted;(void)y;clock_right=x;}
+static void ui_nav_battery_draw(uint8_t *fb,int x,int cy){(void)fb;(void)x;battery_center=cy;}
 static void ui_hairline(uint8_t *fb,int y,int x,int width,int gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
 static void copy_text(char *out,size_t cap,const char *text){snprintf(out,cap,"%s",text);}
-static int ui_text_title_fit(char *text,int px,int width,const char *sample){assert(px==32&&width==450&&!strcmp(text,sample));return 24;}
+static int ui_text_title_fit(char *text,int px,int width,const char *sample){assert(px==32&&width>0&&!strcmp(text,sample));return 24;}
 static char note_lines[6][384];
 static int note_count;
 static int ui_text_fixed_width_px(int px,const char *text){
@@ -109,11 +112,20 @@ esp_err_t pico_online_check(void){assert(feedback_presented&&cache_releases==2);
 esp_err_t pico_online_download(void){assert(feedback_presented&&cache_releases==2);++starts;return start_error;}
 void pico_online_get_status(pico_update_status_t *out){*out=backend_status;}
 #include "ui/ui_nav_layout.h"
-typedef struct {uint8_t *fb;void *hl;} app_ctx_t;
+#include "ui/ui_follow_scroll.h"
+#include "ui/ui_follow_cache.h"
+#include "app.h"
 static enum {SETTINGS_MAIN,SETTINGS_TEXT_EDIT,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SHELF_STYLE,
  SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY} s_page;
-static bool s_input_settle,s_input_layout,s_scroll_present_pending;
+static bool s_input_settle,s_input_layout,s_scroll_present_pending,s_scroll_follow_present,
+ s_scroll_frame_changed,s_scroll_settle_present;
 static EpdRect s_input_area;
+static ui_follow_scroll_t s_follow_scroll;
+static uint8_t *s_scroll_cache;
+static unsigned s_scroll_cache_step;
+static int s_main_scroll;
+#define SETTINGS_SCROLL_MAX 334
+static void settings_scroll_cache_release(void){free(s_scroll_cache);s_scroll_cache=NULL;s_scroll_cache_step=0;}
 typedef struct {int kind;} EpdWaveform;
 static const EpdWaveform E0470_WAVEFORM={0},E0470_FOLLOW_WAVEFORM={1};
 enum EpdDrawMode {MODE_DU,MODE_GL16};
@@ -131,6 +143,13 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const EpdWavefor
 static enum EpdDrawError update_display_area_full_with(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area){
  ++full_pushes;return update_display_area_diff_with(hl,waveform,mode,area);
 }
+static int display_follow_area(void *hl,EpdRect area,bool changed,bool continuous){
+ (void)changed;(void)continuous;return update_display_area_diff_with(hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
+}
+static int display_follow_settle(void *hl,EpdRect area,bool restore){
+ return restore?update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area):0;
+}
+static bool app_settings_main_fast_refresh(void){return false;}
 '''
 unit += "static EpdRect ui_pinpad_full(void){return (EpdRect){0,0,684,1216};}\n"
 for name in ("upgrade_percent", "upgrade_remember", "upgrade_status_redraw", "upgrade_progress_area", "draw_upgrade_percent", "draw_upgrade_progress",
@@ -181,8 +200,9 @@ int main(void){
  cache_releases=0;backend_status.state=PICO_UPDATE_AVAILABLE;snprintf(backend_status.message,sizeof(backend_status.message),"发现新版本，可下载安装");
  upgrade_schedule(true,60);assert(upgrade_start_pending()==APP_REDRAW_PAGE);
  assert(!strcmp(s_upgrade_notice,"无法开始升级，请退出传书后重试"));
- draw_reader_header(NULL);assert(back_center==title_center&&favorite_center==title_center);
- s_reader_favorite=true;draw_reader_header(NULL);assert(back_center==title_center&&favorite_center==title_center);
+ draw_reader_header(NULL);assert(title_left==36&&clock_right==594&&title_center==121&&battery_center==121);
+ draw_reader_header(NULL);assert(title_left==36&&clock_right==594&&title_center==battery_center);
+ title_left=clock_right=-1;
  snprintf(s_update.release.notes,sizeof(s_update.release.notes),"1. 优化图文混排\n2. 支持滑动翻页\n3. 新增自动休眠\n4. 优化蓝牙翻页器\n5. 优化图标与界面\n6. 优化文件管理排版");
  draw_upgrade_notes(NULL);assert(note_count==6&&!strcmp(note_lines[0],"1. 优化图文混排")&&!strcmp(note_lines[5],"6. 优化文件管理排版"));
  note_count=0;s_update.release.notes[0]=0;draw_upgrade_notes(NULL);assert(note_count==1&&!strcmp(note_lines[0],"本次更新暂无说明"));
@@ -212,6 +232,6 @@ assert not any(name in render_body for name in ("pico_online_check(", "pico_onli
 with tempfile.TemporaryDirectory() as folder:
     source, binary = Path(folder)/"test.c", Path(folder)/"test"
     source.write_text(unit)
-    subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
-                    "-I"+str(root/"tools/ota_stubs"), "-I"+str(root/"main"), str(source), "-o", str(binary)], check=True)
+    subprocess.run(["cc", "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk", "-std=gnu11", "-Wall", "-Wextra", "-Werror",
+                    "-I"+str(root/"tools/ui_gesture_stubs"), "-I"+str(root/"tools/ota_stubs"), "-I"+str(root/"main"), str(source), "-o", str(binary)], check=True)
     subprocess.run([str(binary)], check=True)

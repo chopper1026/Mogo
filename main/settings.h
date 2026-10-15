@@ -163,6 +163,9 @@ typedef enum {
     APP_READER_KEY_HOME, ///< 返回首页 / Home
     APP_READER_KEY_REFRESH, ///< 手动全刷 / Manual full refresh
     APP_READER_KEY_NONE, ///< 不操作 / No action
+    // 追加在 NONE 之后：旧固件把 NONE 存为 6，插入会 reinterpret 旧 NVS/备份值。
+    // Appended after NONE: old builds stored NONE as 6; inserting would reinterpret old values.
+    APP_READER_KEY_SHELF, ///< 返回 / Back
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.

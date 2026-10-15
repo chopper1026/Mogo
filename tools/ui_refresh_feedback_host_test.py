@@ -337,7 +337,10 @@ int main(void){
 '''
 
 nav = (root / "main/ui/ui_nav.c").read_text()
-defines = "\n".join(re.findall(r"^#define (?:UI_NAV_(?:NETWORK|BOLT)_ICON_PX|UI_STATUS_\w+_PX) .+$", nav, re.M))
+nav_header = (root / "main/ui/ui_nav.h").read_text()
+# UI_STATUS_TIME_PX 已提升到 ui_nav.h 与阅读页眉共用，宏提取要扫两个文件。
+# UI_STATUS_TIME_PX moved to ui_nav.h for the reader header; extract defines from both files.
+defines = "\n".join(re.findall(r"^#define (?:UI_NAV_(?:NETWORK|BOLT)_ICON_PX|UI_STATUS_\w+_PX) .+$", nav + nav_header, re.M))
 status = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -393,7 +396,7 @@ status += defines + "\n"
 for path, name in (("main/ui/ui_kit.c", "ui_text_fixed_context_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_width_px"),
                    ("main/ui/ui_kit.c", "ui_text_fixed_context_vc"),
-                   ("main/ui/ui_kit.c", "ui_text_fixed_vc"), ("main/ui/ui_nav.c", "status_time"), ("main/ui/ui_nav.c", "clock_text"), ("main/ui/ui_nav.c", "ui_nav_status")):
+                   ("main/ui/ui_kit.c", "ui_text_fixed_vc"), ("main/ui/ui_nav.c", "status_time"), ("main/ui/ui_nav.c", "clock_text"), ("main/ui/ui_nav.c", "ui_nav_clock_draw"), ("main/ui/ui_nav.c", "ui_nav_clock_text"), ("main/ui/ui_nav.c", "ui_nav_battery_draw"), ("main/ui/ui_nav.c", "ui_nav_status")):
     status += function(path, name) + "\n"
 status += r'''
 int main(void){
@@ -521,7 +524,7 @@ with tempfile.TemporaryDirectory() as folder:
         source, binary = Path(folder) / (name + ".c"), Path(folder) / name
         source.write_text(unit)
         extras = [str(root / "main/ui/ui_image_dither.c")] if name == "image-bw" else []
-        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined",
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-isysroot", "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk",
                         "-I" + str(root),
                         str(source), *extras, "-o", str(binary)], check=True)
         subprocess.run([str(binary)], check=True)

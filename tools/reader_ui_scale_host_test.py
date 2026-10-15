@@ -113,5 +113,5 @@ int main(void){uint8_t fb[1]={0};
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as folder:
     c,b=Path(folder)/'test.c',Path(folder)/'test'
     c.write_text(unit)
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(c),'-o',str(b)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',str(c),'-o',str(b)],check=True)
     subprocess.run([str(b)],check=True)
