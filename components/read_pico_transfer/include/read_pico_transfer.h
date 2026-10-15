@@ -10,6 +10,7 @@
  * Frozen: AP webpage or stopped-service device UI may provision; STA rejects remote credential changes.
  */
 #pragma once
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -109,3 +110,9 @@ esp_err_t read_pico_transfer_save_wifi(const char *ssid, const char *password);
 esp_err_t read_pico_transfer_sync_time(uint32_t *utc_seconds);
 /// 已连接 STA 时对时，不断开 WiFi；供 HTTPS 页面校验证书。/ Sync time on connected STA without disconnecting WiFi for HTTPS certificate checks.
 esp_err_t read_pico_transfer_sync_time_online(uint32_t *utc_seconds);
+/// 同一在线对时的可取消版本：500 ms 粒度检查取消标志与连接状态，供后台自动对时使用。
+/// 取消指针为 NULL 时行为与 read_pico_transfer_sync_time_online 一致；两者都不建立、不释放会话。
+/// Cancelable form of the online sync: it re-checks the cancel flag and link state every 500 ms for
+/// background auto-sync. A NULL cancel pointer matches read_pico_transfer_sync_time_online; neither
+/// call builds or releases a session.
+esp_err_t read_pico_transfer_sync_time_online_cancelable(uint32_t *utc_seconds, const atomic_bool *cancel);

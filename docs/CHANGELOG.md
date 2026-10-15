@@ -25,6 +25,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 - 设置的「关机睡眠」在「彻底关机」「先浅睡，10 分钟后深睡」之外新增「仅浅睡」：电源菜单点「关机」、电源键短按锁屏、阅读器长按锁屏与空闲自动锁都改为锁屏浅睡、永不断电，短按电源键或拿起设备直接回到锁屏前的页面，锁屏画面保留（整夜待机耗电高于深睡档，属预期取舍）。旧设置值不受影响；设置备份恢复时「仅浅睡」降级为先浅后深。
   Settings › Power & sleep gains a third option “仅浅睡” (light-only) next to full shutdown and the staged ten-minute ladder: every lock entry — the power menu's shutdown, a short power-key press, the reader long-press lock and the idle auto-lock — now sleeps without a deadline and never powers off, and a short press or pickup returns to the pre-lock page with the lock image retained (overnight idle power is higher than deep sleep, an intentional trade-off). Existing settings values are unaffected; settings backups restore light-only as the staged ladder.
 
+- 新增自动对时：开机或唤醒后，距上次成功对时超过 6 小时就短暂联网校时一次并写入电源管理芯片，长时间开机时按同一间隔补做；「设置 → 日期与时间」新增自动对时开关（默认开）与“上次对时”提示。传书、联网升级与手动对时期间不抢占无线，锁屏前立即释放自动对时用的连接；失败 30 分钟后重试，每次开机最多 3 次。
+  Add automatic time sync: a boot or wake-up whose last success is over six hours old briefly goes online, syncs and seeds the power-management RTC, repeating at the same interval while the device stays on; Settings › Date and time gains the switch (on by default) and a last-sync line. It never competes with transfer, the updater or a manual sync, releases its link before locking, retries thirty minutes after a failure and stops after three attempts per power cycle.
+
 ## 0.3.3-rc91 / 2026-10-12
 
 - 合入 PR #24、#25，支持 EPUB 内嵌 TTF/OpenType 字体，修复开书与关闭书内字体的栈溢出，减少大型章节索引和多字体缓存占用。

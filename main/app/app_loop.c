@@ -57,6 +57,7 @@
 #include "read_pico_sd.h"
 #include "settings.h"
 #include "sleep.h"
+#include "time_sync.h"
 #include "ttf_font.h"
 #include "app_font_context.h"
 #include "ui_kit.h"
@@ -349,6 +350,10 @@ static void switch_to(
     bool shelf_source = main_source && app_index_of(*current) == 1;
     display_main_transition_cancel();
     if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
+    // 传书页独占无线：进页前让自动对时交出自己的会话，否则页面的会话起不来。
+    // The transfer page owns the radio: auto time sync hands its session back before entry, or the
+    // page's own session cannot start.
+    if (next == &app_transfer) app_time_sync_yield_radio();
     *current = next;
     app_font_activate_system();
     if (next->on_enter != NULL) next->on_enter(ctx);
@@ -604,6 +609,7 @@ void app_loop_run(const app_loop_config_t* config) {
     int64_t last_font_retry_ms = 0;
     int64_t last_media_poll_ms = 0;
     int64_t last_network_poll_ms = 0;
+    int64_t last_time_sync_ms = 0;
     int64_t last_input_ms = esp_timer_get_time() / 1000;
     uint32_t last_ble_input = ble_pt_input_serial();
     unsigned idle_minutes = app_settings_auto_lock_minutes();
@@ -735,6 +741,15 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", read_pico_transfer_service_poll());
+        }
+        // 自动对时是系统服务（同 poll_media / 字体重试），页内逻辑仍留在页面里；传书页要自己
+        // 起会话，占用无线期间让路，避免和页面抢同一个会话。
+        // Auto time sync is a system service like poll_media or the font retry; page logic stays in
+        // its page. The transfer page starts its own session, so it keeps the radio free of us.
+        if (ctx.now_ms - last_time_sync_ms >= 2000) {
+            last_time_sync_ms = ctx.now_ms;
+            app_time_sync_poll(ctx.now_ms, current == &app_transfer || usb_storage_active() ||
+                pico_online_busy());
         }
         // A load may have captured navigation after the prior switch. Consume it at the normal boundary.
 

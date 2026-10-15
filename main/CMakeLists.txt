@@ -45,6 +45,7 @@ idf_component_register(
         "ota_update.c"
         "ota_online.c"
         "ota_release.c"
+        "time_sync.c"
         "display.c"
         "display_main_waveform.c"
         "display_reader_waveform.c"

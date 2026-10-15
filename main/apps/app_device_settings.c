@@ -66,6 +66,7 @@
 #include "e0470_epaper_waveform.h"
 #include "pmu_selftest.h"
 #include "soc/rtc_cntl_reg.h"
+#include "time_sync.h"
 
 static void fit_value(char *value, int width);
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge);
@@ -520,6 +521,62 @@ static void row(uint8_t *fb, int y, const char *label, const char *value) {
 }
 static void section(uint8_t *fb, int y, const char *title) {
     ui_text(fb, 40, y, 22, title, EPD_DRAW_ALIGN_LEFT, false);
+}
+
+/* ---- 日期与时间页 / Date and time page ---- */
+
+// 渲染与命中测试共用同一组坐标，避免"画在一处、点在别处"。
+// Painting and hit testing share these coordinates, so a control is never drawn where it cannot be tapped.
+enum {
+    TIME_ROW_CURRENT_Y = 296,
+    TIME_ROW_AUTO_Y = 380,
+    TIME_ROW_WIFI_Y = 470,
+    TIME_ROW_MANUAL_Y = 560,
+    TIME_ROW_HIT_H = 70,
+    TIME_LAST_LINE_Y = 660,
+    TIME_HINT_LINE_Y = 700,
+    TIME_ADVICE_LINE_Y = 740,
+    TIME_NOTICE_LINE_Y = 830,
+};
+
+// 上次对时按"多久以前"显示比记日期好读；从未对时和时钟无效另说。
+// The last sync reads better as an age than as a date; never-synced and an invalid clock differ.
+static void time_last_sync_text(char *out, size_t cap) {
+    uint32_t last = app_settings_time_sync_last();
+    time_t now = time(NULL);
+    if (!last) { snprintf(out, cap, "上次对时：从未"); return; }
+    if (now < 1704067200) {
+        struct tm tm;
+        time_t local = (time_t)last + 8 * 3600;
+        if (gmtime_r(&local, &tm))
+            snprintf(out, cap, "上次对时：%04d-%02d-%02d %02d:%02d",
+                     tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+        else
+            snprintf(out, cap, "上次对时：--");
+        return;
+    }
+    int64_t age = (int64_t)now - (int64_t)last;
+    if (age < 0) age = 0;
+    if (age < 60) snprintf(out, cap, "上次对时：刚刚");
+    else if (age < 3600) snprintf(out, cap, "上次对时：%lld 分钟前", (long long)(age / 60));
+    else if (age < 86400) snprintf(out, cap, "上次对时：%lld 小时前", (long long)(age / 3600));
+    else snprintf(out, cap, "上次对时：%lld 天前", (long long)(age / 86400));
+}
+
+// 自动对时能否生效取决于开关与已保存的网络，缺哪一样就说哪一样。
+// Auto-sync needs the switch and a saved network; name whichever one is missing.
+static void time_auto_hint(char *out, size_t cap) {
+    if (!app_settings_auto_time_sync()) {
+        snprintf(out, cap, "自动对时已关闭，只能按上面的按钮手动对时。");
+        return;
+    }
+    char ssid[33];
+    bool configured = false;
+    if (read_pico_transfer_get_saved_wifi(ssid, &configured) != ESP_OK || !configured) {
+        snprintf(out, cap, "自动对时需要先在 WiFi 设置里连接网络。");
+        return;
+    }
+    snprintf(out, cap, "自动对时会在联网时校准，最短间隔 6 小时一次。");
 }
 
 /* ---- 蓝牙翻页器子页的版式 / Layout of the Bluetooth sub-page ---- */
@@ -1092,12 +1149,17 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
         }
         section(fb, 253, "当前时间 · 北京时间");
-        row(fb, 296, shown, "");
-        row(fb, 407, "通过 WiFi 对时", "立即同步  ›");
-        row(fb, 518, "手动设置", "编辑  ›");
-        ui_text(fb, 54, 656, 21, "对时成功后由内部时钟持续走时；无需保持联网。", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 694, 21, "长时间离线可能产生误差，建议定期重新对时。", EPD_DRAW_ALIGN_LEFT, false);
-        if (s_notice[0]) ui_text(fb, 54, 772, 22, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+        row(fb, TIME_ROW_CURRENT_Y, shown, "");
+        row(fb, TIME_ROW_AUTO_Y, "自动对时", app_settings_auto_time_sync() ? "开  ›" : "关  ›");
+        row(fb, TIME_ROW_WIFI_Y, "通过 WiFi 对时", "立即同步  ›");
+        row(fb, TIME_ROW_MANUAL_Y, "手动设置", "编辑  ›");
+        char line[96];
+        time_last_sync_text(line, sizeof(line));
+        ui_text(fb, 54, TIME_LAST_LINE_Y, 21, line, EPD_DRAW_ALIGN_LEFT, false);
+        time_auto_hint(line, sizeof(line));
+        ui_text(fb, 54, TIME_HINT_LINE_Y, 21, line, EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, TIME_ADVICE_LINE_Y, 21, "长时间离线可能产生误差，建议定期重新对时。", EPD_DRAW_ALIGN_LEFT, false);
+        if (s_notice[0]) ui_text(fb, 54, TIME_NOTICE_LINE_Y, 22, s_notice, EPD_DRAW_ALIGN_LEFT, false);
         ui_nav_draw(fb, 3);
         return;
     }
@@ -1614,6 +1676,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     uint32_t utc = 0;
     read_pico_transfer_status_t network = {0};
     read_pico_transfer_get_status(&network);
+    // 手动对时优先：自动对时若正占着会话就先交回，免得两次 SNTP 抢同一个连接。
+    // A manual sync goes first: auto-sync hands its session back so two SNTP runs never share a link.
+    app_time_sync_yield_radio();
     esp_err_t err = read_pico_transfer_sync_time(&utc);
     bool network_time_received = err == ESP_OK;
     if (network_time_received) {
@@ -1625,6 +1690,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             if (!pmu || !pmu->time_synced || pmu->unix_sec < utc || pmu->unix_sec - utc > 10)
                 err = ESP_ERR_INVALID_RESPONSE;
         }
+        // 手动对时也算一次成功，自动对时不必再联网重复。
+        // A manual sync counts as a success, so auto-sync need not go online again.
+        if (err == ESP_OK) app_time_sync_note_success(utc);
     }
     ESP_LOGI(TAG, "time sync network=%d ready=%d utc=%lu result=%s",
              network.mode, network.network_ready, (unsigned long)utc, esp_err_to_name(err));
@@ -2013,12 +2081,17 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_PAGE;
     }
     if (s_page == SETTINGS_TIME) {
-        if (y >= 407 && y < 477) {
+        if (y >= TIME_ROW_AUTO_Y && y < TIME_ROW_AUTO_Y + TIME_ROW_HIT_H) {
+            app_settings_set_auto_time_sync(!app_settings_auto_time_sync());
+            s_notice[0] = 0;
+            return APP_REDRAW_PAGE;
+        }
+        if (y >= TIME_ROW_WIFI_Y && y < TIME_ROW_WIFI_Y + TIME_ROW_HIT_H) {
             s_notice[0] = 0; s_sync_pending = true;
             snprintf(s_notice, sizeof(s_notice), "正在获取网络时间…");
             return APP_REDRAW_PAGE;
         }
-        if (y >= 518 && y < 588) { time_open(); return APP_REDRAW_PAGE; }
+        if (y >= TIME_ROW_MANUAL_Y && y < TIME_ROW_MANUAL_Y + TIME_ROW_HIT_H) { time_open(); return APP_REDRAW_PAGE; }
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_POWER_SLEEP) {

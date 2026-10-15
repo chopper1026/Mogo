@@ -61,6 +61,18 @@ bool app_settings_main_fast_refresh(void);
 /// 无操作自动锁屏分钟数：0 关闭，1/5/10。/ Idle lock timeout: off, 1/5/10 minutes.
 uint8_t app_settings_auto_lock_minutes(void);
 void app_settings_set_auto_lock_minutes(uint8_t minutes);
+/// 自动对时开关（默认开）。开机/唤醒后距上次成功对时超过阈值才联网校时，深睡期间不可能对时。
+/// Auto time sync, on by default. It goes online only when the last successful sync is older than
+/// the interval, and only while the host runs; deep sleep cannot reach the network at all.
+bool app_settings_auto_time_sync(void);
+void app_settings_set_auto_time_sync(bool on);
+/// 上次成功对时的 UTC 秒与上次尝试的 UTC 秒（0 = 从未）。设备本地运行记录，不随设置备份迁移。
+/// Last successful and last attempted sync in UTC seconds (zero means never). Device-local runtime
+/// records; they deliberately stay out of the settings backup.
+uint32_t app_settings_time_sync_last(void);
+void app_settings_set_time_sync_last(uint32_t utc);
+uint32_t app_settings_time_sync_attempt(void);
+void app_settings_set_time_sync_attempt(uint32_t utc);
 const char *app_settings_device_name(void);
 void app_settings_set_device_name(const char *name);
 const char *app_settings_avatar_path(void);

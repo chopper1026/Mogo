@@ -43,6 +43,7 @@
 #include "display.h"
 #include "e0470_epaper_waveform.h"
 #include "ota_online.h"
+#include "time_sync.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -385,6 +386,10 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     if (mode != APP_SLEEP_OFF && mode != APP_SLEEP_DEEP) return ESP_ERR_INVALID_ARG;
     // 产品页用 on_before_lock 保存并收齐后台；保留阅读内存以便交接失败仍可回到原页。
     // Product pages checkpoint/join in on_before_lock; retain reader state so a failed handoff can resume the same page.
+    // 自动对时的会话先交出：暂停会快照会话，浅睡唤醒后把它复活，那不是自动对时想要的。
+    // Hand the auto-sync session back first: pause snapshots sessions and the light-sleep wake revives
+    // them, which auto-sync never wants.
+    app_time_sync_yield_radio();
     if (pico_online_busy() || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
     (void)ble_pt_stop(2000);
     (void)app_sync_time_to_pmu();
@@ -447,6 +452,10 @@ void enter_lock_and_sleep(
     s_lock_feedback_visible = false;
     // Refuse to interrupt an active upload. The caller repaints its page when
     // this function returns, and the user can lock again after the transfer.
+    // 自动对时的会话同样先交回：它没有上传任务，锁屏不该被一次后台对时拖住。
+    // Auto time sync hands its session back too: it has no upload to protect, and a lock must never
+    // wait on a background sync.
+    app_time_sync_yield_radio();
     bool radio_paused = read_pico_transfer_pause_for_sleep();
     if (!radio_paused) {
         pico_boot_clear_resume();

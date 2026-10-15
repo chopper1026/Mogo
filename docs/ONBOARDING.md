@@ -316,6 +316,16 @@ flowchart TD
 - **VCOM 只存在 PMU**。主机开机读一次，不落 NVS，产品页无修改入口；`vcom_setup.c` 是未标定时的出厂拦截页，唯一会调 `vcom_set` 的地方。
 - 完整协议说明给人看 PDF，给 agent 看 `docs/llms-full_zh_cn.md`。
 
+### 6.7 时间与自动对时（[main/time_sync.c](../main/time_sync.c)、[main/time_sync_policy.h](../main/time_sync_policy.h)）
+
+- 两个走时源：主机运行期用 40 MHz 晶振（准）；深睡/关机期间只有 PMU 的 RC RTC（无晶振，±1–2%），开机由 `app_main.c: restore_time_from_pmu()` 灌回系统时钟，漂移因此只集中在断电时长上。
+- 睡前 `sleep.c: app_sync_time_to_pmu()` 把主机时间写进 PMU，所以 PMU 的误差从睡前开始累积。
+- 自动对时：开机/唤醒后距上次成功对时 ≥6 小时即短暂联网校时（阈值、冷却与次数上限都在 `time_sync_policy.h`）；失败冷却 30 分钟、每次开机最多 3 次。门禁：开关关闭、无已保存网络、传书页/USB 存储/OTA 进行中、蓝牙翻页器已连接、电量 <10% 且未充电时不启动。
+- 会话所有权：自动对时启动的 STA 会话归界面循环，`app_time_sync_yield_radio()` 先取消并释放它，否则 `read_pico_transfer_pause_for_sleep()` 会快照会话并在浅睡唤醒后复活。调用点：`sleep.c` 的 `app_enter_host_sleep()` 与 `enter_lock_and_sleep()`、主循环 `switch_to()` 进传书页前、设置页手动对时与 `ota_online.c:online()` 开始前。PMU 写入留在界面循环任务（PMU I2C 无互斥），只有 SNTP 在短命 worker 里跑，取消粒度 500 ms。
+- NVS（命名空间 `read_pico`）：`auto_time`(u8，默认 1)、`tsync_at`(u32)、`tsync_try`(u32)。设备本地状态，**不进设置备份**。
+- 主循环每 2 秒调用一次 `app_time_sync_poll()`：系统服务钩子（同 `poll_media`、字体重试），页面逻辑仍留在页面里。
+- 回归：`sh tools/run_time_sync_host_test.sh`（策略判定）。
+
 ---
 
 ## 7. 演示页与冻结决策速查 / Demo pages & Frozen decisions

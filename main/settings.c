@@ -39,6 +39,9 @@
 #define NVS_KEY_HOME_GOAL "home_goal"
 #define NVS_KEY_MAIN_REFRESH "main_mode"
 #define NVS_KEY_AUTO_LOCK "idle_lock"
+#define NVS_KEY_AUTO_TIME "auto_time"
+#define NVS_KEY_TSYNC_AT "tsync_at"
+#define NVS_KEY_TSYNC_TRY "tsync_try"
 #define NVS_KEY_DEVICE_NAME "dev_name"
 #define NVS_KEY_AVATAR "dev_avatar"
 #define NVS_KEY_STATUS_SIGNATURE "status_sig"
@@ -132,10 +135,16 @@ static uint8_t s_book_tracking = 2, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
+// 自动对时默认开：与设置页开关、time_sync 服务共用同一份运行状态。
+// Auto sync defaults on and shares one runtime copy with the settings page and time_sync.
+static bool s_auto_time_sync = true;
+static uint32_t s_time_sync_last;
+static uint32_t s_time_sync_try;
 static uint8_t s_shelf_style = 2;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
+static void nvs_put_u32(const char* key, uint32_t value);
 static void reader_keys_repair(uint8_t keys[3], uint8_t hold) {
     if (hold == APP_READER_KEY_TOOLS) return;
     for (unsigned i = 0; i < 3; ++i) if (keys[i] == APP_READER_KEY_TOOLS) return;
@@ -208,6 +217,10 @@ void app_settings_init(void) {
 
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_AUTO_LOCK, &raw) == ESP_OK && (raw == 1 || raw == 5 || raw == 10)) s_auto_lock_minutes = raw;
+    if (nvs_get_u8(h, NVS_KEY_AUTO_TIME, &raw) == ESP_OK) s_auto_time_sync = raw != 0;
+    else s_auto_time_sync = true;
+    if (nvs_get_u32(h, NVS_KEY_TSYNC_AT, &s_time_sync_last) != ESP_OK) s_time_sync_last = 0;
+    if (nvs_get_u32(h, NVS_KEY_TSYNC_TRY, &s_time_sync_try) != ESP_OK) s_time_sync_try = 0;
     size_t value_len = sizeof(s_device_name);
     if (nvs_get_str(h, NVS_KEY_DEVICE_NAME, s_device_name, &value_len) != ESP_OK || !s_device_name[0])
         strlcpy(s_device_name, "kiikoread", sizeof(s_device_name));
@@ -425,6 +438,27 @@ void app_settings_set_auto_lock_minutes(uint8_t minutes) {
     nvs_put_u8(NVS_KEY_AUTO_LOCK, minutes);
 }
 
+bool app_settings_auto_time_sync(void) { return s_auto_time_sync; }
+void app_settings_set_auto_time_sync(bool on) {
+    if (s_auto_time_sync == on) return;
+    s_auto_time_sync = on;
+    nvs_put_u8(NVS_KEY_AUTO_TIME, on ? 1 : 0);
+}
+
+uint32_t app_settings_time_sync_last(void) { return s_time_sync_last; }
+void app_settings_set_time_sync_last(uint32_t utc) {
+    if (s_time_sync_last == utc) return;
+    s_time_sync_last = utc;
+    nvs_put_u32(NVS_KEY_TSYNC_AT, utc);
+}
+
+uint32_t app_settings_time_sync_attempt(void) { return s_time_sync_try; }
+void app_settings_set_time_sync_attempt(uint32_t utc) {
+    if (s_time_sync_try == utc) return;
+    s_time_sync_try = utc;
+    nvs_put_u32(NVS_KEY_TSYNC_TRY, utc);
+}
+
 void app_settings_set_home_full_refresh(bool enabled) {
     if (enabled == s_home_full_refresh) return;
     s_home_full_refresh = enabled;
@@ -509,6 +543,14 @@ static void nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_u8(h, key, value);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void nvs_put_u32(const char* key, uint32_t value) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, key, value);
     nvs_commit(h);
     nvs_close(h);
 }

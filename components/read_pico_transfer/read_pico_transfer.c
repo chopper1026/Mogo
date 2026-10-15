@@ -680,6 +680,12 @@ time_cleanup:
 }
 
 esp_err_t read_pico_transfer_sync_time_online(uint32_t *utc_seconds) {
+    return read_pico_transfer_sync_time_online_cancelable(utc_seconds, NULL);
+}
+
+// 分片等待让后台自动对时能在 500 ms 内响应取消或掉线，不必等满 12 s。
+// Sliced waiting lets background auto-sync react to a cancel or a lost link within 500 ms.
+esp_err_t read_pico_transfer_sync_time_online_cancelable(uint32_t *utc_seconds, const atomic_bool *cancel) {
     if (!utc_seconds) return ESP_ERR_INVALID_ARG;
     *utc_seconds = 0;
     read_pico_transfer_status_t status;
@@ -689,7 +695,17 @@ esp_err_t read_pico_transfer_sync_time_online(uint32_t *utc_seconds) {
     esp_sntp_config_t sntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_err_t err = esp_netif_sntp_init(&sntp);
     if (err != ESP_OK) return err;
-    err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(12000));
+    int64_t deadline = esp_timer_get_time() + 12000000;
+    bool aborted = false;
+    do {
+        if (cancel && atomic_load(cancel)) { aborted = true; break; }
+        read_pico_transfer_get_status(&status);
+        if (status.mode != READ_PICO_TRANSFER_MODE_STA || !status.network_ready) {
+            aborted = true; break;
+        }
+        err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(500));
+    } while (err != ESP_OK && esp_timer_get_time() < deadline);
+    if (aborted) err = ESP_ERR_INVALID_STATE;
     if (err == ESP_OK) {
         time_t now = time(NULL);
         if (now >= 1704067200 && now <= UINT32_MAX) *utc_seconds = (uint32_t)now;
