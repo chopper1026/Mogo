@@ -372,13 +372,20 @@ enum=settings[settings.index('typedef enum {\n    APP_READER_KEY_PREV'):settings
 input_header=(source.parents[1]/'book/book_reader_input.h').read_text()
 input_header='\n'.join(line for line in input_header.splitlines() if not line.startswith(('#include','#pragma')))
 unit+=enum+'\n'+input_header+r'''
-static book_reader_tap_t s_reader_tap;
 static app_reader_key_action_t test_keys[3]={APP_READER_KEY_PREV,APP_READER_KEY_TOOLS,APP_READER_KEY_NEXT};
 static app_reader_key_action_t test_hold_action=APP_READER_KEY_REFRESH;
 static app_reader_key_action_t app_settings_reader_hold_action(void){return test_hold_action;}
 static app_reader_key_action_t app_settings_reader_key_action(unsigned key){return test_keys[key];}
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
+// 题头预留区 stub：提取的排版函数会调用，宿主不验证题头像素。
+// Chapter-heading stubs: extracted layout functions call them; the host build
+// does not verify heading pixels.
+static char s_chapter_heading_title[128], s_chapter_heading_label[32];
+static size_t s_chapter_lead_skip;
+static unsigned s_chapter_lead_row_height;
+static void apply_chapter_lead(const char *title, const char *label, size_t skip, unsigned height) {(void)title;(void)label;(void)skip;(void)height;}
+static void refresh_chapter_lead(void) { apply_chapter_lead(s_chapter_heading_title, s_chapter_heading_label, s_chapter_lead_skip, s_chapter_lead_row_height); }
 '''
 unit += r"""
 #define SHELF_CATEGORY_LIMIT 128
@@ -423,8 +430,8 @@ int main(void) {
     assert(reader_swipe_direction(UI_GESTURE_SWIPE_R,false)==1);
     assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,true)==1);
     test_book_vertical=false;
-    // 普通/沉浸正文采用半屏或1/3+2/3，中间双击独立处理。
-    // Normal/immersive tap regions use halves or 1/3+2/3 with independent center double taps.
+    // 普通/沉浸正文采用半屏或1/3+2/3；单击即翻页，中央双击已取消。
+    // Normal/immersive tap regions use halves or 1/3+2/3; every tap turns at once.
     const EpdRect bodies[]={{36,180,612,900},{24,24,636,1182}};
     for (unsigned i=0;i<2;++i) {
         EpdRect body=bodies[i];
@@ -435,13 +442,6 @@ int main(void) {
         // rtl 翻转左右分区：右半边是上一页，左半边是下一页。
         assert(book_reader_tap_direction(body,body.x,body.y,false,true)==1);
         assert(book_reader_tap_direction(body,body.x+body.width-1,body.y,false,true)==-1);
-        book_reader_tap_t tap={0};
-        assert(!book_reader_tap_feed(&tap,body,342,600,false,false,1000));
-        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==BOOK_READER_TAP_FULLSCREEN);
-        assert(!book_reader_tap_tick(&tap,2000,false));
-        assert(!book_reader_tap_feed(&tap,body,342,600,true,false,3000));
-        assert(book_reader_tap_tick(&tap,3341,false)==1);
-        assert(!book_reader_tap_tick(&tap,4000,false));
     }
     app_ctx_t remote_ctx={0};s_view=SHELF;test_shelf_style=2;s_visible_count=27;
     assert(shelf_turn_page(&remote_ctx,-1)==APP_REDRAW_NONE&&remote_ctx.leaf==0);
@@ -797,9 +797,9 @@ int main(void) {
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&s_view==READING&&!test_system_face);
     s_text=NULL;set_reader_view(TOC);
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&s_view==SHELF&&test_system_face);
-    s_view=READING;s_text="body";s_reader_tap.pending=true;
+    s_view=READING;s_text="body";
     test_keys[0]=APP_READER_KEY_PREV;test_keys[1]=APP_READER_KEY_TOOLS;test_keys[2]=APP_READER_KEY_NEXT;
-    assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_turn_direction==-1 && !s_reader_tap.pending);
+    assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_turn_direction==-1);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_NONE && test_turn_direction==1);
     s_reader_panel=READER_PANEL_NONE;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_NONE);

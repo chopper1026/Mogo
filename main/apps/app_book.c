@@ -169,7 +169,7 @@
 #define BOOK_MARGIN_MIN 0
 #define BOOK_MARGIN_MAX 48
 #define BOOK_MARGIN_CHOICES 9
-#define BOOK_TOOL_COUNT 5
+#define BOOK_TOOL_COUNT 6
 #define BOOK_FONT_PAGE 9
 #define BOOKMARK_MAX 24
 #define BOOKMARK_ROWS 6
@@ -380,7 +380,6 @@ static int s_pressed_control = -1;
 static bool s_shelf_feedback_pending;
 static bool s_cover_batch_present_pending;
 static bool s_shelf_page_pending;
-static book_reader_tap_t s_reader_tap;
 static unsigned s_reader_key_pick;
 static char s_reader_key_error[64];
 static int64_t s_du_ms;
@@ -1477,7 +1476,6 @@ static void invalidate_prep(void) { s_next_page = s_prep_page = -1; }
 // 目录使用系统字体；切换前等待预渲染结束，回正文时恢复阅读字体与字形缓存。
 // The directory uses the system face; join painting before switching and restore the reader face on return.
 static void set_reader_view(book_view_t view) {
-    s_reader_tap.pending = false;
     lock_draw();
     invalidate_prep();
     if (view == READING) app_font_activate_reading();
@@ -1729,17 +1727,22 @@ static bool bookmark_toggle(void) {
 }
 
 static void draw_reader_tool_icon(uint8_t* fb, int cx, int cy, int kind, bool selected) {
-    // 阅读工具栏图标全部来自 Lucide；已保存的书签用带勾的一档区分未保存。
-    // Reader toolbar icons all come from Lucide; a saved bookmark uses the check variant.
+    // 阅读工具栏图标全部来自 Lucide；已保存的书签用带勾的一档区分未保存，
+    // 全屏按钮随当前状态在进入/退出两枚图标之间切换。
+    // Reader toolbar icons all come from Lucide; a saved bookmark uses the check
+    // variant, and the full-screen button follows the current state.
     static const ui_icon_t tools[] = {
         UI_ICON_LIST,          // 0 目录
         UI_ICON_BOOKMARK,      // 1 书签
         UI_ICON_CHART_COLUMN,  // 2 阅读统计
         UI_ICON_BOOK_OPEN,     // 3 阅读设置 / Reading settings
         UI_ICON_TYPE,          // 4 字体设置
+        UI_ICON_MAXIMIZE_2,    // 5 全屏 / Full screen
     };
     if (kind < 0 || kind >= (int)(sizeof(tools) / sizeof(tools[0]))) return;
-    const ui_icon_t icon = (kind == 1 && selected) ? UI_ICON_BOOKMARK_CHECK : tools[kind];
+    const ui_icon_t icon = (kind == 1 && selected) ? UI_ICON_BOOKMARK_CHECK
+                         : (kind == 5 && s_reader_fullscreen) ? UI_ICON_MINIMIZE_2
+                         : tools[kind];
     ui_draw_icon(fb, cx, cy, READER_TOOL_ICON_PX, icon, 0x38);
 }
 
@@ -2273,7 +2276,7 @@ static void draw_turn_settings(uint8_t *fb) {
         epd_draw_circle(610, y + 61, 12, 0x38, fb);
         if (selected) epd_fill_circle(610, y + 61, 7, UI_GRAY_BLACK, fb);
     }
-    reader_panel_text_vc(fb, 342, 1051, 21, "中间区域双击切换全屏 · 始终可用", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 1051, 21, "工具栏「全屏」按钮切换全屏", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
@@ -2316,7 +2319,6 @@ static void draw_key_settings(uint8_t *fb) {
     ui_text_box(fb,(EpdRect){322,652,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
     ui_draw_icon(fb, 625, 679, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     reader_panel_text(fb, 58, 710, 19, "点击选择长按功能，例如返回首页", EPD_DRAW_ALIGN_LEFT, false);
-    reader_panel_text_vc(fb, 342, 775, 20, "屏幕中间双击切换全屏，不受按键设置影响", EPD_DRAW_ALIGN_CENTER, false);
     for (unsigned preset = 1; preset <= 2; ++preset) {
         EpdRect card = reader_key_preset_card(preset);
         bool selected = reader_key_preset_selected(preset);
@@ -2537,7 +2539,8 @@ static void draw_reader_panel(uint8_t* fb) {
     if (s_reader_panel == READER_PANEL_TOOLS) {
         epd_fill_rect((EpdRect){0, 1096, UI_LOCK_WIDTH, 120}, UI_GRAY_WHITE, fb);
         ui_hairline(fb, 1096, 0, UI_LOCK_WIDTH, 0x98);
-        const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置"};
+        const char* labels[] = {"目录", "书签", "阅读统计", "阅读设置", "字体设置",
+                                s_reader_fullscreen ? "退出全屏" : "全屏"};
         for (int i = 0; i < BOOK_TOOL_COUNT; ++i) {
             EpdRect rect = tool_rect(i);
             int cx = rect.x + rect.width / 2;
@@ -4218,8 +4221,11 @@ static void manage_apply(app_ctx_t* ctx) {
 /* ---- 输入与生命周期 / Input and lifecycle ---- */
 
 static bool reader_turn_chrome(app_ctx_t *ctx) {
-    bool changed = !s_reader_fullscreen || s_toolbar;
-    if (!s_reader_fullscreen) (void)toggle_reader_fullscreen(ctx);
+    // 翻页只收起面板与滑块，全屏状态保持不变；全屏切换走工具栏按钮与按键。
+    // Turns collapse panels and sliders only; full screen stays untouched and is
+    // toggled from the toolbar button or keys.
+    (void)ctx;
+    bool changed = s_reader_panel != READER_PANEL_NONE || s_reader_slider >= 0;
     s_reader_panel = READER_PANEL_NONE;
     s_reader_slider = -1;
     if (changed) { invalidate_prep(); s_reader_text_frame = false; }
@@ -4675,6 +4681,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_reader_panel = READER_PANEL_STATS;
             } else if (i == 3) {
                 s_reader_panel = READER_PANEL_REFRESH_SETTINGS;
+            } else if (i == 5) {
+                return toggle_reader_fullscreen(ctx);
             } else {
                 s_line_spacing = app_settings_book_line_spacing();
                 s_reader_slider = -1;
@@ -5391,27 +5399,12 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         EpdRect tap_area = body_rect();
         if (reader_image_slots(s_page)) tap_area = ui_rect_union(tap_area, book_layout_image_rect());
         if (!ui_rect_hit(tap_area, x, y)) return APP_REDRAW_NONE;
+        int target = book_reader_tap_direction(tap_area, x, y,
+                                              app_settings_reader_vertical_turn(),
+                                              app_settings_book_vertical());
 #if CONFIG_TOUCH_DIAG
-        bool td_pen = s_reader_tap.pending;      // 本击前已挂起的中间区点击 / pending center tap before this one
-        int td_pen_dir = s_reader_tap.direction;
+        TD_LOGI("TAPZ out=%d", target);
 #endif
-        int target = book_reader_tap_feed(&s_reader_tap, tap_area, x, y,
-                                         app_settings_reader_vertical_turn(),
-                                         app_settings_book_vertical(), ctx->now_ms);
-#if CONFIG_TOUCH_DIAG
-        {
-            bool center = book_reader_center(tap_area, x, y);
-            TD_LOGI("TAPZ %s out=%d pen=%d->%d olddir=%d", center ? "center" : "side",
-                    target, (int)td_pen, (int)s_reader_tap.pending, td_pen_dir);
-            // 挂起被冲销且不是双击：旧的那次中间区点击永远丢了。
-            // Pending consumed without a double-tap: the earlier center tap is lost for good.
-            if (td_pen && !s_reader_tap.pending && target != BOOK_READER_TAP_FULLSCREEN) {
-                TD_LOGI("PENDING_DROP out=%d", target);
-                touch_diag_beep();
-            }
-        }
-#endif
-        if (target == BOOK_READER_TAP_FULLSCREEN) return toggle_reader_fullscreen(ctx);
         if (target) return turn_page(ctx, target);
         return APP_REDRAW_NONE;
     }
@@ -5457,7 +5450,6 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
 static void on_enter(app_ctx_t* ctx) {
     shelf_category_init();
     s_category_menu=false;
-    s_reader_tap.pending = false;
     s_shelf_page_pending = false;
     // 设置页试按的旧事件不得在开书后翻页。/ Discard remote tests from earlier pages before opening a book.
     ble_pt_event_t old_key;
@@ -5541,9 +5533,7 @@ static void on_enter(app_ctx_t* ctx) {
 }
 static void book_on_exit(app_ctx_t* ctx) {
     shelf_category_remember(ctx);
-    s_category_menu=false;
-    s_reader_tap.pending = false;
-    s_shelf_page_pending = false;
+    s_category_menu=false;    s_shelf_page_pending = false;
     ui_keyboard_end();
     s_presented_view = -1;
     free(s_editor_cover); s_editor_cover = NULL;
@@ -5564,9 +5554,7 @@ static void book_on_exit(app_ctx_t* ctx) {
 // Stop old-card handles and font preparation before the loop switches to the builtin font.
 static void book_on_media_lost(app_ctx_t* ctx) {
     shelf_category_remember(ctx);
-    s_category_menu=false;
-    s_reader_tap.pending = false;
-    lock_draw();
+    s_category_menu=false;    lock_draw();
     save_progress();
     free_book();
     unlock_draw();
@@ -5700,15 +5688,14 @@ static app_redraw_t paint_control(app_ctx_t* ctx, EpdRect rect) {
     s_area = rect;
     return APP_REDRAW_AREA;
 }
-// 左右滑动始终可用；上下点按模式另外保留上下滑动，不改变中间轻点切换全屏。
+// 左右滑动始终可用；上下点按模式另外保留上下滑动。
 // Horizontal swipes work in both tap modes; vertical mode also keeps vertical swipes.
-// 从屏幕底部120px上滑呼出工具栏；其他面板保留自己的滑动，正文中部仍按翻页模式解释。
+// 从屏幕底部120px上滑呼出工具栏；其他面板保留自己的滑动，正文滑动仍按翻页模式解释。
 // Open tools from the bottom 120px; other panels keep their own swipes and mid-body gestures retain turn semantics.
 static bool reader_tools_swipe(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if (s_view != READING || !s_text || s_reader_panel != READER_PANEL_NONE ||
         s_clear_confirm || s_scan_pending || ctx->consumed || ev->type != UI_GESTURE_SWIPE_U ||
         ev->x0 >= UI_LOCK_WIDTH || ev->y0 < UI_LOCK_HEIGHT - 120 || ev->y0 >= UI_LOCK_HEIGHT) return false;
-    s_reader_tap.pending = false;
     s_pressed_control = s_reader_slider = -1;
     s_reader_panel = READER_PANEL_TOOLS;
     s_stats_activity_ms = ctx->now_ms;
@@ -5732,11 +5719,6 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         return reader_background_step(ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
     }
-    if (ev->type == UI_GESTURE_CANCEL || ev->type == UI_GESTURE_LONG_PRESS ||
-        ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R ||
-        ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D ||
-        (ev->type == UI_GESTURE_PRESS && !book_reader_center(body_rect(), ev->x0, ev->y0)))
-        s_reader_tap.pending = false;
     if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;
     bool input_feedback = false;
     if (s_view == SEARCH || s_view == EDIT) {
@@ -5896,9 +5878,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
     }
     return decorated ? paint_control(ctx, start_rect) : APP_REDRAW_NONE;
 }
-static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {
-    s_reader_tap.pending = false;
-    switch (action) {
+static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t action) {    switch (action) {
         case APP_READER_KEY_PREV: case APP_READER_KEY_NEXT:
             s_stats_activity_ms = ctx->now_ms;
             return turn_page(ctx, action == APP_READER_KEY_PREV ? -1 : 1);
@@ -5913,9 +5893,7 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         default: return APP_REDRAW_NONE;
     }
 }
-static app_redraw_t on_key(app_ctx_t* ctx, int key) {
-    s_reader_tap.pending = false;
-    s_pressed_control = -1;
+static app_redraw_t on_key(app_ctx_t* ctx, int key) {    s_pressed_control = -1;
     if (s_view == TOC && s_toc_jump_open) {
         if (key == UI_KEY_2) s_toc_jump_open = s_toc_jump_drag = false;
         else if (key == UI_KEY_1 || key == UI_KEY_3) {
@@ -5963,17 +5941,13 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     ctx->leaf = next;
     return APP_REDRAW_PAGE;
 }
-static app_redraw_t on_power_short(app_ctx_t* ctx) {
-    s_reader_tap.pending = false;
-    if (s_view != READING || !s_text || s_clear_confirm ||
+static app_redraw_t on_power_short(app_ctx_t* ctx) {    if (s_view != READING || !s_text || s_clear_confirm ||
         !app_settings_reader_power_turn()) return APP_REDRAW_NONE;
     s_stats_activity_ms = ctx->now_ms;
     app_redraw_t result = turn_page(ctx, 1);
     return result == APP_REDRAW_NONE ? APP_REDRAW_DONE : result;
 }
-static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
-    s_reader_tap.pending = false;
-    if (key != UI_KEY_2) return APP_REDRAW_NONE;
+static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {    if (key != UI_KEY_2) return APP_REDRAW_NONE;
     if (s_view == TOC && s_toc_jump_open) {
         s_toc_jump_open = s_toc_jump_drag = false;
         return APP_REDRAW_PAGE;
@@ -6037,14 +6011,6 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
         if (s_text && book_kind() == BOOK_KIND_EPUB)
             (void)load_chapter(ctx, s_chapter, book_layout_page_start_offset(s_page), false);
         return APP_REDRAW_PAGE;
-    }
-    if (s_view != READING || (s_toolbar && s_reader_panel != READER_PANEL_TOOLS) || s_clear_confirm || ctx->consumed) s_reader_tap.pending = false;
-    else {
-        int tap = book_reader_tap_tick(&s_reader_tap, ctx->now_ms, ctx->touch && ctx->touch->touched);
-        if (tap) {
-            TD_LOGI("PENDING_FLUSH dir=%d", tap);
-            return turn_page(ctx, tap);
-        }
     }
     TD_TIME("ticket", track_ticket_stats(ctx));
     if (s_view == SEARCH || s_view == EDIT) {
@@ -6145,9 +6111,7 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
 }
 static void before_lock(app_ctx_t* ctx) {
     shelf_category_remember(ctx);
-    s_category_menu=false;
-    s_reader_tap.pending = false;
-    track_ticket_stats(ctx);
+    s_category_menu=false;    track_ticket_stats(ctx);
     save_progress();
     // 锁屏可切系统字体，先收齐阅读预渲染，防止后台使用被替换的字形。
     // Lock faces may switch to the system font; join reader preparation before replacing glyphs.

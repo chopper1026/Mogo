@@ -79,6 +79,10 @@ static int64_t s_reader_clock_minute,s_reader_clock_painted_minute;
 static unsigned s_cover_dirty_mask,s_cover_present_mask;
 static bool reader_status_visible(void){return false;}
 static EpdRect reader_status_area(void){return (EpdRect){24,18,156,44};}
+/* F4 诊断埋点宏（touch_diag.h 默认关）；提取的函数引用它们，桩按关闭态展开。/ The F4 diag
+   macros (touch_diag.h, off by default) are referenced by extracted functions; stub them disabled. */
+#define TD_LOGI(...) do { } while (0)
+#define TD_TIME(src, ...) do { __VA_ARGS__; } while (0)
 static int64_t ui_nav_clock_minute(void){return 100;}
 static void reader_status_paint(uint8_t *fb){(void)fb;}
 static bool shelf_cover_frame_ready(void){return true;}
@@ -136,7 +140,6 @@ static void set_reader_view(int view){s_view=view;}
 static void lock_draw(void){}
 static void unlock_draw(void){}
 static void invalidate_prep(void){}
-static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 static size_t fb_bytes(void){return 1;}
 static void draw_reader(uint8_t *fb,unsigned page){*fb=(uint8_t)page;}
 
@@ -213,7 +216,7 @@ int main(void){
  for(int full=0;full<2;++full){
    s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
    s_reader_footer_pending=!full;trace_count=0;
-   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==READER_CLEANUP&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
+   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==READER_CLEANUP&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_TEXTTURN_WAVEFORM);
    s_reader_turn_pending=true;trace_count=0;
    assert(present(&ctx,APP_REDRAW_FULL)&&trace_count==1&&route==FULL);
  }
@@ -267,13 +270,26 @@ int main(void){
  for(int full=0;full<2;++full)for(int hidden=0;hidden<2;++hidden)
  for(int from=0;from<3;++from)for(int to=0;to<3;++to){
    s_reader_fullscreen=full;test_hide_images=hidden;test_types[0][0]=from;test_types[0][1]=to;
-   s_view=s_presented_view=READING;s_reader_panel=READER_PANEL_NONE;s_chapter=s_page=0;
+   s_view=s_presented_view=READING;s_reader_panel=READER_PANEL_NONE;s_reader_slider=-1;s_chapter=s_page=0;
    trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
    assert(s_reader_text_frame==(hidden||from==0));
    app_redraw_t redraw=turn_page(&ctx,1);
    bool eligible=hidden||(from==0&&to==0);
-   assert(s_reader_fullscreen && s_reader_panel==READER_PANEL_NONE);
-   if (!full) {assert(redraw==APP_REDRAW_PAGE&&!s_reader_turn_pending);trace_count=0;present(&ctx,redraw);assert(trace_route[0]==(to&&!hidden?WHOLE:READER));continue;}
+   assert(s_reader_fullscreen==full && s_reader_panel==READER_PANEL_NONE);
+   if (!full) {
+     // 翻页保持退出全屏：正文 AREA 推屏加页脚 DU 差分；有插图时正文走灰阶分支、页脚走差分。
+     // Turns keep windowed mode: one body AREA push plus a DU footer differential; images take
+     // the grayscale branch with a differential footer.
+     assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
+     trace_count=0;present(&ctx,redraw);
+     if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);
+     else if(to)assert(trace_mode[0]==MODE_GC16&&trace_wave[0]==E0470_FULL_WAVEFORM);
+     else assert(trace_wave[0]==E0470_WAVEFORM&&trace_route[0]==AREA);
+     assert(!s_reader_turn_pending&&s_reader_text_frame==(hidden||to==0));
+     if(to&&!hidden)assert(trace_count==2&&trace_route[1]==DIFF&&trace_mode[1]==MODE_GL16&&trace_wave[1]==E0470_WAVEFORM);
+     else assert(trace_count==2&&trace_route[1]==AREA&&trace_mode[1]==MODE_DU&&trace_wave[1]==E0470_FOLLOW_WAVEFORM);
+     continue;
+   }
    assert(redraw==APP_REDRAW_AREA&&s_reader_turn_pending==eligible);
    trace_count=0;present(&ctx,redraw);
    if(eligible)assert(trace_route[0]==DIFF&&trace_wave[0]==E0470_SOFT_TEXTTURN_WAVEFORM);

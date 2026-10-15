@@ -82,6 +82,8 @@ ICONS = (
     "cpu",               # BOOT 刷机 / boot flashing
     "book-open",         # 阅读设置 / reading settings
     "timer",             # 自动休眠 / idle lock
+    "maximize-2",        # 阅读工具栏·进入全屏 / reader toolbar, enter full screen
+    "minimize-2",        # 阅读工具栏·退出全屏 / reader toolbar, exit full screen
 )
 
 _NUMBER = re.compile(r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?")
