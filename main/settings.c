@@ -62,6 +62,9 @@
 #define NVS_KEY_READER_FULL "rd_gc16"
 #define NVS_KEY_READER_TURN "rd_turn"
 #define NVS_KEY_POWER_TURN "rd_power"
+// 状态栏显隐新键；rd_immersive 是旧「全屏沉浸」位，仅作老固件升级迁移与降级回写。/ New
+// status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
+#define NVS_KEY_STATUS "rd_status"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
 #define NVS_KEY_HIDE_IMAGES "rd_no_image"
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
@@ -114,7 +117,7 @@ static uint8_t s_reader_full_pages = 15;
 static uint8_t s_reader_turn_effect;
 static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
 static bool s_reader_power_turn;
-static bool s_reader_immersive;
+static bool s_reader_statusbar = true;
 static bool s_reader_hide_images;
 static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
@@ -282,8 +285,15 @@ void app_settings_init(void) {
         s_reader_turn_effect = reader_turn_effect;
     uint8_t power_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_POWER_TURN, &power_turn) == ESP_OK) s_reader_power_turn = power_turn == 1;
-    uint8_t immersive = 0;
-    if (nvs_get_u8(h, NVS_KEY_IMMERSIVE, &immersive) == ESP_OK) s_reader_immersive = immersive == 1;
+    // 状态栏显隐：新键优先；老固件只有沉浸位，沉浸=1 迁移为隐藏，两键皆无则默认显示。
+    // Status visibility prefers the new key; firmwares before it only had the immersive bit,
+    // where 1 meant hidden. With neither key present the bar defaults to shown.
+    uint8_t statusbar = 1;
+    if (nvs_get_u8(h, NVS_KEY_STATUS, &statusbar) != ESP_OK || statusbar > 1) {
+        uint8_t legacy = 0;
+        statusbar = nvs_get_u8(h, NVS_KEY_IMMERSIVE, &legacy) == ESP_OK && legacy == 1 ? 0 : 1;
+    }
+    s_reader_statusbar = statusbar == 1;
     uint8_t hold_refresh = 0;
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
@@ -665,11 +675,14 @@ void app_settings_set_reader_power_turn(bool on) {
     s_reader_power_turn = on;
     nvs_put_u8(NVS_KEY_POWER_TURN, on ? 1 : 0);
 }
-bool app_settings_reader_immersive(void) { return s_reader_immersive; }
-void app_settings_set_reader_immersive(bool on) {
-    if (s_reader_immersive == on) return;
-    s_reader_immersive = on;
-    nvs_put_u8(NVS_KEY_IMMERSIVE, on ? 1 : 0);
+bool app_settings_reader_statusbar(void) { return s_reader_statusbar; }
+void app_settings_set_reader_statusbar(bool on) {
+    if (s_reader_statusbar == on) return;
+    s_reader_statusbar = on;
+    nvs_put_u8(NVS_KEY_STATUS, on ? 1 : 0);
+    // 同步旧沉浸位（1=隐藏），旧固件降级后全屏行为保持一致。/ Mirror the retired immersive
+    // bit (1=hidden) so a downgrade keeps the same full-screen behavior.
+    nvs_put_u8(NVS_KEY_IMMERSIVE, on ? 0 : 1);
 }
 bool app_settings_reader_hide_images(void) { return s_reader_hide_images; }
 void app_settings_set_reader_hide_images(bool on) {
@@ -1030,7 +1043,9 @@ esp_err_t app_settings_backup_save(void) {
     f[BK_FULL_PAGES] = s_reader_full_pages;
     f[BK_TURN] = s_reader_turn_effect;
     f[BK_POWER_TURN] = s_reader_power_turn;
-    f[BK_IMMERSIVE] = s_reader_immersive;
+    // BK_IMMERSIVE 槽位沿用旧沉浸位语义：1=状态栏隐藏。/ The BK_IMMERSIVE slot keeps the old
+    // bit meaning: 1 = status bar hidden.
+    f[BK_IMMERSIVE] = s_reader_statusbar ? 0 : 1;
     f[BK_TRACKING] = s_book_tracking;
     f[BK_READING_LINE] = s_book_reading_line;
     f[BK_LINE_SPACING] = s_book_line;
@@ -1313,7 +1328,11 @@ esp_err_t app_settings_backup_restore(void) {
     BACKUP_SET_U8(NVS_KEY_READER_FULL, BK_FULL_PAGES);
     BACKUP_SET_U8(NVS_KEY_READER_TURN, BK_TURN);
     BACKUP_SET_U8(NVS_KEY_POWER_TURN, BK_POWER_TURN);
+    // 旧槽位写旧键，状态栏新键按位取反；两键都落盘，升级/降级双向一致。/ Write the legacy
+    // key from the legacy slot and the inverted status-bar key; both stay in sync across
+    // upgrades and downgrades.
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
     BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
@@ -1370,7 +1389,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_full_pages = f[BK_FULL_PAGES];
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
-    s_reader_immersive = f[BK_IMMERSIVE];
+    s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;

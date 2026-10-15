@@ -72,7 +72,7 @@ static unsigned app_settings_reader_full_pages(void){return 15;}
 static unsigned app_settings_reader_turn_effect(void){return 1;}
 static bool app_settings_reader_vertical_turn(void){return true;}
 static bool app_settings_reader_power_turn(void){return true;}
-static bool app_settings_reader_immersive(void){return true;}
+static bool app_settings_reader_statusbar(void){return true;}
 static bool app_settings_reader_hide_images(void){return false;}
 '''
 unit+=function('ui_text_box',kit).replace('void ui_text_box(', 'static void actual_text_box(')+'\n'

@@ -134,9 +134,9 @@ void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);
-/// 沉浸全屏时隐藏阅读状态栏。/ Hide the reader status bar in immersive full screen.
-bool app_settings_reader_immersive(void);
-void app_settings_set_reader_immersive(bool on);
+/// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
+bool app_settings_reader_statusbar(void);
+void app_settings_set_reader_statusbar(bool on);
 /// 阅读时跳过书内插图页；原图仍保留在 EPUB 中。/ Skip inline illustrations while reading without changing the EPUB.
 bool app_settings_reader_hide_images(void);
 void app_settings_set_reader_hide_images(bool on);

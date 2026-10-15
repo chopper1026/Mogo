@@ -447,8 +447,13 @@ static size_t fb_bytes(void) { return (size_t)epd_width() * epd_height() / 2; }
 #define READER_FULLSCREEN_PROGRESS_TOP (UI_LOCK_HEIGHT - 12)
 // 正文上方留出一致的呼吸空间，下沿靠近进度区；两种模式共用排版与刷新边界。
 // Give the body a consistent top inset and extend it toward the progress strip in both modes.
+// 状态栏隐藏时正文上沿收到 80：全屏贴顶，带头部时头部整体上移让出空间。
+// With the status bar hidden the body inset tightens to 80: flush at the top in full screen,
+// and under the shifted-up header in windowed mode.
 static EpdRect reader_area(void) {
-    const int top = s_reader_fullscreen ? (app_settings_reader_immersive() ? 0 : 80) : 160;
+    const int top = s_reader_fullscreen
+        ? (app_settings_reader_statusbar() ? 80 : 0)
+        : (app_settings_reader_statusbar() ? 160 : 80);
     // 全屏进度线单独差分，翻页时不让正文刷新反复驱动整条横线。
     // Keep the full-screen progress strip out of body updates so turns do not drive the whole bar.
     const int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP : UI_BAR_TOP + 8;
@@ -459,7 +464,9 @@ static EpdRect reader_fullscreen_progress_area(void) {
                      UI_LOCK_WIDTH, UI_LOCK_HEIGHT - READER_FULLSCREEN_PROGRESS_TOP};
 }
 static EpdRect body_rect_for_tracking(int tracking_index) {
-    int top = s_reader_fullscreen ? (app_settings_reader_immersive() ? 24 : 96) : 188;
+    int top = s_reader_fullscreen
+        ? (app_settings_reader_statusbar() ? 96 : 24)
+        : (app_settings_reader_statusbar() ? 188 : 108);
     int margin = s_margin;
     // Leave only a narrow strip for the full-book progress line in full screen.
     int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 8;
@@ -2237,7 +2244,7 @@ static void draw_reading_settings(uint8_t* fb) {
     draw_reading_card(fb, 2, "翻页模式", app_settings_reader_vertical_turn() ? "上下翻页" : "左右翻页", false);
     draw_reading_toggle(fb, 0, "电源键翻页", NULL, app_settings_reader_power_turn());
     draw_reading_card(fb, 4, "按键控制", "自定义三键", false);
-    draw_reading_toggle(fb, 1, "全屏沉浸", NULL, app_settings_reader_immersive());
+    draw_reading_toggle(fb, 1, "状态栏", NULL, app_settings_reader_statusbar());
     draw_reading_toggle(fb, 2, "关闭书内图片", "跳过正文插图，保留原书文件", app_settings_reader_hide_images());
     draw_reading_toggle(fb, 3, "竖排（从右到左）", NULL, app_settings_book_vertical());
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
@@ -2573,16 +2580,20 @@ static uint8_t inline_ink_gray(uint8_t gray) {
 }
 
 static void draw_reader_header(uint8_t *fb) {
-    ui_nav_back(fb, 36, 79);
+    // 状态栏隐藏时头部整体上移 80px 贴顶；返回键、书名与收藏共用中心线随平移保持对齐。
+    // With the status bar hidden the header shifts up 80 px to the top edge; back, title and
+    // favorite keep their shared centerline under the shift.
+    const int dy = app_settings_reader_statusbar() ? 0 : -80;
+    ui_nav_back(fb, 36, 79 + dy);
     char header[128];
     const char *sample = s_book_title[0] ? s_book_title : s_title;
     copy_text(header, sizeof(header), sample);
     int title_px = ui_text_title_fit(header, 32, 450, sample);
     // 返回键、书名与收藏使用同一视觉中心线；字体切换不改变对齐。
     // Back, title and favorite share one visual centerline across font changes.
-    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 114, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
-    draw_favorite_icon(fb, 605, 96, 30, 36, s_reader_favorite, 0x38);
-    ui_hairline(fb, 151, 36, 612, UI_GRAY_LIGHT);
+    ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, 114 + dy, title_px, header, sample, EPD_DRAW_ALIGN_CENTER);
+    draw_favorite_icon(fb, 605, 96 + dy, 30, 36, s_reader_favorite, 0x38);
+    ui_hairline(fb, 151 + dy, 36, 612, UI_GRAY_LIGHT);
 }
 // 竖排章节题头：右列是编号（第三章），左列是章名，读序依旧自右向左；两列整体留出列宽，
 // 排版用同一个宽度在首页右边缘预留，绘制与预留因此不会错位。
@@ -2756,7 +2767,7 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
 static void draw_reader(uint8_t* fb, size_t page) {
     ui_text_set_system_scale(false);
     ui_clear_page(fb);
-    if (!(s_reader_fullscreen && app_settings_reader_immersive())) ui_nav_status(fb);
+    if (app_settings_reader_statusbar()) ui_nav_status(fb);
     if (!s_reader_fullscreen) draw_reader_header(fb);
     EpdRect body = body_rect();
     book_layout_draw_page(fb, page, body, s_px);
@@ -2948,7 +2959,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
 }
 static EpdRect reader_status_area(void) { return (EpdRect){0,0,UI_LOCK_WIDTH,80}; }
 static bool reader_status_visible(void) {
-    return s_view==READING && s_text && !(s_reader_fullscreen && app_settings_reader_immersive());
+    return s_view==READING && s_text && app_settings_reader_statusbar();
 }
 static void reader_status_paint(uint8_t *fb) {
     EpdRect area=reader_status_area();
@@ -4411,7 +4422,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
         return APP_REDRAW_PAGE;
     }
     if (!s_text || kind < 1 || kind > 3) return APP_REDRAW_NONE;
-    bool previous = kind == 1 ? app_settings_reader_immersive() :
+    bool previous = kind == 1 ? app_settings_reader_statusbar() :
                     kind == 2 ? app_settings_reader_hide_images() : app_settings_book_vertical();
     // 重新开启插图时，先补齐尺寸；文件读取必须在绘制锁外。
     // Probe missing dimensions before re-enabling images, outside the drawing lock.
@@ -4428,7 +4439,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     lock_draw();
     size_t off = book_layout_page_start_offset(s_page);
     invalidate_prep();
-    if (kind == 1) app_settings_set_reader_immersive(!previous);
+    if (kind == 1) app_settings_set_reader_statusbar(!previous);
     else if (kind == 2) {
         app_settings_set_reader_hide_images(!previous);
         book_layout_set_images_visible(previous);
@@ -4447,7 +4458,7 @@ static app_redraw_t apply_reader_option(app_ctx_t* ctx, int kind) {
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count, body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
-        if (kind == 1) app_settings_set_reader_immersive(previous);
+        if (kind == 1) app_settings_set_reader_statusbar(previous);
         else if (kind == 2) {
             app_settings_set_reader_hide_images(previous);
             book_layout_set_images_visible(!previous);
@@ -5375,9 +5386,12 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
     if (s_view == READING) {
         if (s_toolbar && !(s_reader_panel == READER_PANEL_TOOLS && y < 1096 && ui_rect_hit(body_rect(), x, y)))
             return reader_panel_action(ctx, x, y);
-        if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 75, 64, 64}, x, y))
+        // 页头热区与绘制共用同一偏移；状态栏隐藏时上移 80px。
+        // Header hit zones share the drawing offset; shifted up 80 px with the status bar hidden.
+        const int header_dy = app_settings_reader_statusbar() ? 0 : -80;
+        if (!s_reader_fullscreen && ui_rect_hit((EpdRect){32, 75 + header_dy, 64, 64}, x, y))
             return reader_return(ctx, false);
-        if (!s_reader_fullscreen && x >= 584 && y >= 76 && y < 145) {
+        if (!s_reader_fullscreen && x >= 584 && y >= 76 + header_dy && y < 145 + header_dy) {
             bool next = !s_reader_favorite;
             if (!favorite_save(s_path, next)) {
                 copy_text(s_reader_notice, sizeof(s_reader_notice), "收藏保存失败");
@@ -5389,7 +5403,11 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
                 if (!strcmp(s_shelf[i].path, s_path)) s_shelf[i].favorite = next;
             sort_shelf(ctx);
             render(ctx, ctx->fb);
-            s_area = (EpdRect){584, 76, 64, 70};
+            // 局部刷新区钳到屏内：上移后 76+dy 为负，收缩高度保持覆盖收藏图标。
+            // Clamp the partial-refresh rect on screen: 76+dy goes negative once shifted;
+            // shrink the height so the favorite icon stays covered.
+            const int fav_top = 76 + header_dy;
+            s_area = (EpdRect){584, fav_top < 0 ? 0 : fav_top, 64, fav_top < 0 ? 70 + fav_top : 70};
             s_mode = MODE_GL16;
             return APP_REDRAW_AREA;
         }

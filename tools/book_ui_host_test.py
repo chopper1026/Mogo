@@ -258,7 +258,7 @@ static EpdRect s_area;
 static void prepare_covers(app_ctx_t *ctx){(void)ctx;++test_cover_prepares;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++test_shelf_renders;}
 static bool s_resume_pending,s_reader_cleanup,s_shake_enabled;
-static bool s_reader_fullscreen,test_reader_immersive,test_hold_refresh,test_hide_images,test_power_turn;
+static bool s_reader_fullscreen,test_reader_statusbar=true,test_hold_refresh,test_hide_images,test_power_turn;
 static bool test_images_visible=true;
 static int test_reflow_failures,test_reflows,test_image_preparations;
 static EpdRect test_reflow_rect;
@@ -283,7 +283,7 @@ static bool book_layout_build_blocks(const char* text,size_t len,const void* blo
 static size_t book_layout_page_for_offset(size_t off){return off/100;}
 static bool app_settings_reader_power_turn(void){return test_power_turn;}
 static void app_settings_set_reader_power_turn(bool on){test_power_turn=on;}
-static void app_settings_set_reader_immersive(bool on){test_reader_immersive=on;}
+static void app_settings_set_reader_statusbar(bool on){test_reader_statusbar=on;}
 static void app_settings_set_reader_hold_refresh(bool on){test_hold_refresh=on;}
 static void app_settings_set_reader_hide_images(bool on){test_hide_images=on;}
 static bool s_reader_footer_pending,s_reader_image_refresh_pending,s_water_turn_pending;
@@ -310,7 +310,7 @@ static int app_settings_book_indent(void){return 2;}
 static int app_settings_book_indent_adjust(void){return 0;}
 static int app_settings_book_reading_line(void){return 0;}
 static int app_settings_book_reading_line_offset(void){return 0;}
-static bool app_settings_reader_immersive(void){return test_reader_immersive;}
+static bool app_settings_reader_statusbar(void){return test_reader_statusbar;}
 static bool app_settings_reader_hold_refresh(void){return test_hold_refresh;}
 static bool app_settings_reader_hide_images(void){return test_hide_images;}
 static void book_layout_set_spacing(int line,int para){(void)line;(void)para;}
@@ -534,11 +534,11 @@ int main(void) {
     assert(reading_body.y+reading_body.height==fullscreen_progress.y);
     assert(text_body.y+text_body.height==fullscreen_progress.y-2);
     assert(fullscreen_progress.y==UI_LOCK_HEIGHT-12&&fullscreen_progress.height==12);
-    test_reader_immersive=true;
+    test_reader_statusbar=false;
     reading_body=reader_area();
     text_body=body_rect();
     assert(reading_body.y==0&&text_body.y==24&&text_body.y+text_body.height==fullscreen_progress.y-2);
-    s_reader_fullscreen=test_reader_immersive=false;
+    s_reader_fullscreen=false;test_reader_statusbar=true;
     char footer_name[72];
     reader_footer_strip_number(footer_name,sizeof(footer_name),"第一章：海边的信");
     assert(!strcmp(footer_name,"海边的信"));
@@ -774,7 +774,7 @@ int main(void) {
     s_reader_panel=READER_PANEL_TOOLS;s_page=1;
     assert(apply_reader_option(&ctx,0)==APP_REDRAW_PAGE&&test_power_turn);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL);
-    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&test_reader_immersive&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!test_reader_statusbar&&s_page==1);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
     assert(test_image_preparations==2&&test_reflows==2);
     test_reflow_failures=1;
@@ -784,7 +784,7 @@ int main(void) {
     test_hold_action=APP_READER_KEY_HOME;test_nav_target=-1;
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE && test_nav_target==0);
     test_hold_action=APP_READER_KEY_REFRESH;
-    test_hold_refresh=test_power_turn=false;s_reader_fullscreen=test_reader_immersive=false;
+    test_hold_refresh=test_power_turn=false;s_reader_fullscreen=false;test_reader_statusbar=true;
     s_view=TOC;s_toc_jump_open=true;s_toc_jump_percent=50;
     assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&s_toc_jump_percent==45);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE&&s_toc_jump_percent==50);

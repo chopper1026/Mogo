@@ -202,7 +202,7 @@ int main(void) {
     s_reader_full_pages = 5;
     s_reader_turn_effect = 1;
     s_reader_power_turn = true;
-    s_reader_immersive = true;
+    s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
     s_shelf_style = 3;
     s_shutdown_style = APP_SHUTDOWN_STAGED;
     s_auto_lock_minutes = 5;
@@ -309,7 +309,7 @@ int main(void) {
     s_reader_full_pages = 15;
     s_reader_turn_effect = 0;
     s_reader_power_turn = false;
-    s_reader_immersive = false;
+    s_reader_statusbar = true;
     s_shelf_style = 2;
     s_shutdown_style = APP_SHUTDOWN_FULL;
     s_auto_lock_minutes = 0;
@@ -339,7 +339,7 @@ int main(void) {
     assert(app_settings_book_indent_adjust()==-7&&loaded_adjust==13);
     assert(s_book_px == 62 && s_book_tracking == 4 && s_book_indent == 3 &&
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
-    assert(s_reader_turn_effect == 1 && s_reader_power_turn && s_reader_immersive && s_shelf_style == 2);
+    assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
     assert(s_shutdown_style == APP_SHUTDOWN_STAGED && app_settings_auto_lock_minutes() == 5);
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
