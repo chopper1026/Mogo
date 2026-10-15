@@ -24,6 +24,11 @@ enum {READING,TOC,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS};
 #define E0470_TURN_RTL 1
 #define E0470_TURN_LTR -1
 #define ESP_LOGI(...) ((void)0)
+/* F4 触摸诊断埋点与题头重算：本测试不验证其行为，桩保持调用面即可。
+   F4 touch-diag logging and the heading refresh are stubbed; this test never asserts them. */
+#define TD_LOGI(...) ((void)0)
+#define TD_TIME(tag, expr) ((void)(tag), (expr))
+static void refresh_chapter_lead(void){}
 static char s_requested_open[288];
 static bool s_requested_fullscreen=true,s_requested_open_home;
 static const char *s_text="text";
@@ -41,6 +46,9 @@ static char s_message[128];
 static unsigned layout_span=100,reflows,paints,saves,failed_reflows;
 static uint8_t full_pages;
 static const char *app_settings_book_background_path(void){return "";}
+static bool test_open_full=true;
+static bool app_settings_reader_open_fullscreen(void){return test_open_full;}
+static void app_settings_set_reader_open_fullscreen(bool on){test_open_full=on;}
 static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static void lock_draw(void){assert(!draw_locked);draw_locked=true;}
 static void unlock_draw(void){assert(draw_locked);draw_locked=false;}
@@ -103,34 +111,48 @@ int main(void){
  assert(app_book_request_resume("/sdcard/book.epub",false)&&!s_requested_fullscreen&&s_requested_open_home);
  assert(app_book_request_open_from_home("/sdcard/other.epub")&&s_requested_fullscreen);
  assert(!app_book_request_open(NULL)&&!app_book_request_open(""));
+ // Shelf entries follow the remembered preference; toggling persists it immediately.
+ test_open_full=false;
+ assert(app_book_request_open("/sdcard/book.epub")&&!s_requested_fullscreen&&!s_requested_open_home);
+ assert(app_book_request_open_from_home("/sdcard/other.epub")&&!s_requested_fullscreen);
+ test_open_full=true;
+ assert(app_book_request_open("/sdcard/book.epub")&&s_requested_fullscreen);
+ reset(false,true,2,0);size_t fs_anchor=book_layout_page_start_offset(s_page);
+ assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&s_reader_fullscreen&&test_open_full);
+ assert(book_layout_page_start_offset(s_page)<=fs_anchor&&fs_anchor<book_layout_page_start_offset(s_page)+layout_span&&saves==1);
+ reset(true,false,2,0);assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&!s_reader_fullscreen&&!test_open_full);
+ // 12:55 a+b 之后翻页保持当前模式：非全屏不再自动切全屏；reset 留着 slider=2，
+ // 翻页收滑块即返回 PAGE 且不跑水波；水波正路径由下方 slider=-1 的场景覆盖。
+ // Since a+b a turn keeps the current mode. reset leaves slider=2, so every turn collapses
+ // chrome and returns PAGE without the ripple; the ripple path is covered below with slider=-1.
  for(int full=0;full<2;++full)for(int tools=0;tools<2;++tools)for(int dir=-1;dir<=1;dir+=2){
   reset(full,tools,2,0);size_t destination=book_layout_page_start_offset(s_page+dir);
   app_redraw_t r=turn_page(&ctx,dir);
-  assert(s_reader_fullscreen&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
+  assert(s_reader_fullscreen==!!full&&s_reader_panel==READER_PANEL_NONE&&s_reader_slider==-1);
   assert(s_stats_pending_turns==1&&s_session_turns==1&&paints==1);
-  assert(book_layout_page_start_offset(s_page)<=destination&&destination<book_layout_page_start_offset(s_page)+layout_span);
-  assert(reflows==(unsigned)!full);
-  assert(r==((!full||tools)?APP_REDRAW_PAGE:APP_REDRAW_AREA));
-  assert(s_water_turn_pending==!!(full&&!tools));
+  assert(book_layout_page_start_offset(s_page)==destination);
+  assert(!reflows&&r==APP_REDRAW_PAGE&&!s_water_turn_pending&&!s_reader_turn_pending);
  }
+ reset(true,false,2,0);s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&s_water_turn_pending&&s_reader_turn_pending&&s_reader_fullscreen);
+ reset(false,false,2,0);s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&s_water_turn_pending&&s_reader_turn_pending&&!s_reader_fullscreen);
  // Mixed/image targets and leaving an image never run the text ripple waveform.
- reset(true,false,2,0);test_images=2;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
- reset(true,false,2,0);test_images=0;s_reader_text_frame=false;
+ reset(true,false,2,0);test_images=2;s_reader_slider=-1;assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
+ reset(true,false,2,0);test_images=0;s_reader_text_frame=false;s_reader_slider=-1;
  assert(turn_page(&ctx,1)==APP_REDRAW_AREA&&!s_water_turn_pending&&!s_reader_turn_pending);
  test_images=0;
  reset(false,true,0,0);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE);
- assert(s_reader_fullscreen&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns);
+ assert(!s_reader_fullscreen&&!s_toolbar&&s_page==0&&!paints&&!s_stats_pending_turns);
  reset(false,true,8,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
- assert(s_reader_fullscreen&&!s_toolbar&&s_page==5&&!s_stats_pending_turns);
+ assert(!s_reader_fullscreen&&!s_toolbar&&s_page==8&&!s_stats_pending_turns);
  reset(true,true,5,1);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&!s_toolbar&&!reflows);
- reset(false,true,8,0);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_chapter==1&&s_page==0&&s_reader_fullscreen);
- reset(false,true,0,1);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_chapter==0&&s_page==5&&s_reader_fullscreen);
+ reset(false,true,8,0);assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_chapter==1&&s_page==0&&!s_reader_fullscreen&&!s_toolbar);
+ reset(false,true,0,1);assert(turn_page(&ctx,-1)==APP_REDRAW_PAGE&&s_chapter==0&&s_page==8&&!s_reader_fullscreen&&!s_toolbar);
  reset(false,true,8,0);load_failed=true;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE&&s_view==TOC&&!paints&&!s_stats_pending_turns);
  reset(false,true,2,0);failed_reflows=1;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
- assert(s_text&&!s_reader_fullscreen&&!s_toolbar&&layout_span==100&&s_page==3&&reflows==2);
+ assert(s_text&&!s_reader_fullscreen&&!s_toolbar&&layout_span==100&&s_page==3&&reflows==0);
  reset(false,true,2,0);failed_reflows=2;assert(turn_page(&ctx,1)==APP_REDRAW_PAGE);
- assert(!s_text&&s_view==SHELF&&!paints&&!s_stats_pending_turns&&s_message[0]);
- puts("PASS: native full-screen entry and explicit sleep overrides; old-layout destination anchors; toolbar dismissal; chapter/boundary turns; failed reflow restores safely or returns to the shelf");
+ assert(s_text&&s_view==READING&&s_page==3&&reflows==0&&paints==1&&s_stats_pending_turns==1);
+ puts("PASS: full-screen entry follows the remembered preference; toggles persist it; turns keep the current mode; toolbar dismissal; chapter/boundary turns");
 }
 '''
 with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:

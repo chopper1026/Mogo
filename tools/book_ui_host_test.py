@@ -284,6 +284,8 @@ static size_t book_layout_page_for_offset(size_t off){return off/100;}
 static bool app_settings_reader_power_turn(void){return test_power_turn;}
 static void app_settings_set_reader_power_turn(bool on){test_power_turn=on;}
 static void app_settings_set_reader_statusbar(bool on){test_reader_statusbar=on;}
+static bool test_open_full=true;
+static bool app_settings_reader_open_fullscreen(void){return test_open_full;}
 static void app_settings_set_reader_hold_refresh(bool on){test_hold_refresh=on;}
 static void app_settings_set_reader_hide_images(bool on){test_hide_images=on;}
 static bool s_reader_footer_pending,s_reader_image_refresh_pending,s_water_turn_pending;

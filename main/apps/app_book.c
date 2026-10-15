@@ -410,7 +410,10 @@ bool app_book_request_open(const char* path) {
     if (!path || !path[0] || strnlen(path, sizeof(s_requested_open)) >= sizeof(s_requested_open)) return false;
     copy_text(s_requested_open, sizeof(s_requested_open), path);
     s_requested_open_home = false;
-    s_requested_fullscreen = true;
+    // 从书架进书沿用用户记忆的全屏偏好（默认全屏）；锁屏恢复链路仍用显式参数。
+    // Shelf entries follow the remembered full-screen preference (default on); the sleep
+    // resume path keeps its explicit argument.
+    s_requested_fullscreen = app_settings_reader_open_fullscreen();
     return true;
 }
 bool app_book_request_open_from_home(const char* path) {
@@ -3687,7 +3690,7 @@ static bool open_requested_book(app_ctx_t* ctx) {
     s_requested_open[0] = 0;
     s_requested_open_home = false;
     bool opened = open_book(ctx, path);
-    s_requested_fullscreen = true;
+    s_requested_fullscreen = app_settings_reader_open_fullscreen();
     if (!opened) return false;
     s_reader_return_home = from_home;
     return true;
@@ -4546,6 +4549,9 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     prepare_inline_image();
     s_jump_offset = SIZE_MAX;
     s_reader_panel = READER_PANEL_NONE;
+    // 切换成功即落盘偏好；重排失败的回滚路径不写。/ Persist the preference on a successful
+    // toggle only; the failed-reflow rollback path never writes.
+    app_settings_set_reader_open_fullscreen(s_reader_fullscreen);
     save_progress();
     return APP_REDRAW_PAGE;
 }

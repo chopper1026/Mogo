@@ -137,6 +137,11 @@ void app_settings_set_reader_power_turn(bool on);
 /// 阅读页顶部状态栏显隐；关闭后全屏与非全屏一并隐藏。/ Show or hide the reader status bar; off hides it in both full screen and windowed modes.
 bool app_settings_reader_statusbar(void);
 void app_settings_set_reader_statusbar(bool on);
+/// 打开图书时的全屏偏好：记住用户上次的全屏/非全屏模式，从书架进书沿用；默认全屏。
+/// Full-screen preference when opening a book: remember the user's last mode for shelf
+/// entries; full screen by default.
+bool app_settings_reader_open_fullscreen(void);
+void app_settings_set_reader_open_fullscreen(bool on);
 /// 阅读时跳过书内插图页；原图仍保留在 EPUB 中。/ Skip inline illustrations while reading without changing the EPUB.
 bool app_settings_reader_hide_images(void);
 void app_settings_set_reader_hide_images(bool on);

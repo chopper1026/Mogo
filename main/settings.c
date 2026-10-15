@@ -66,6 +66,7 @@
 // status-bar key; rd_immersive is the retired immersive bit kept for upgrades and downgrade writes.
 #define NVS_KEY_STATUS "rd_status"
 #define NVS_KEY_IMMERSIVE "rd_immersive"
+#define NVS_KEY_OPEN_FULL "rd_open_full"
 #define NVS_KEY_HIDE_IMAGES "rd_no_image"
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
@@ -118,6 +119,9 @@ static uint8_t s_reader_turn_effect;
 static uint8_t s_book_line = 130, s_book_para = 50, s_book_margin = 24;
 static bool s_reader_power_turn;
 static bool s_reader_statusbar = true;
+// 打开图书的全屏偏好：默认全屏（沿用历史行为），用户切换后记忆。/ Full-screen preference when
+// opening a book: full screen by default (historical behavior), remembered once toggled.
+static bool s_reader_open_fullscreen = true;
 static bool s_reader_hide_images;
 static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
@@ -294,6 +298,9 @@ void app_settings_init(void) {
         statusbar = nvs_get_u8(h, NVS_KEY_IMMERSIVE, &legacy) == ESP_OK && legacy == 1 ? 0 : 1;
     }
     s_reader_statusbar = statusbar == 1;
+    uint8_t open_full = 1;
+    if (nvs_get_u8(h, NVS_KEY_OPEN_FULL, &open_full) == ESP_OK && open_full > 1) open_full = 1;
+    s_reader_open_fullscreen = open_full == 1;
     uint8_t hold_refresh = 0;
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
@@ -684,6 +691,12 @@ void app_settings_set_reader_statusbar(bool on) {
     // bit (1=hidden) so a downgrade keeps the same full-screen behavior.
     nvs_put_u8(NVS_KEY_IMMERSIVE, on ? 0 : 1);
 }
+bool app_settings_reader_open_fullscreen(void) { return s_reader_open_fullscreen; }
+void app_settings_set_reader_open_fullscreen(bool on) {
+    if (s_reader_open_fullscreen == on) return;
+    s_reader_open_fullscreen = on;
+    nvs_put_u8(NVS_KEY_OPEN_FULL, on ? 1 : 0);
+}
 bool app_settings_reader_hide_images(void) { return s_reader_hide_images; }
 void app_settings_set_reader_hide_images(bool on) {
     if (s_reader_hide_images == on) return;
@@ -924,6 +937,16 @@ static bool backup_weight_valid(const settings_backup_weight_t *weight) {
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)weight->checksum[i] << (8 * i);
     return (weight->encoded <= 4 || (weight->encoded>=128&&weight->encoded<=192)) && stored == backup_weight_checksum(weight);
 }
+// v18 adds the reader's remembered full-screen preference; older backups restore the default.
+typedef struct { uint8_t open_full, checksum[4]; } settings_backup_open_full_t;
+static uint32_t backup_open_full_checksum(const settings_backup_open_full_t *open_full) {
+    return (2166136261u ^ open_full->open_full) * 16777619u;
+}
+static bool backup_open_full_valid(const settings_backup_open_full_t *open_full) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)open_full->checksum[i] << (8 * i);
+    return open_full->open_full <= 1 && stored == backup_open_full_checksum(open_full);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -949,7 +972,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1029,7 +1052,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETH", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETI", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1094,6 +1117,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_weight_t weight = {.encoded = 128+s_book_weight_fine+APP_BOOK_WEIGHT_FINE_MAX};
     uint32_t weight_hash = backup_weight_checksum(&weight);
     for (unsigned i = 0; i < 4; ++i) weight.checksum[i] = (uint8_t)(weight_hash >> (8 * i));
+    settings_backup_open_full_t open_full = {.open_full = s_reader_open_fullscreen ? 1 : 0};
+    uint32_t open_full_hash = backup_open_full_checksum(&open_full);
+    for (unsigned i = 0; i < 4; ++i) open_full.checksum[i] = (uint8_t)(open_full_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1118,6 +1144,7 @@ esp_err_t app_settings_backup_save(void) {
     uint32_t home_hash = backup_home_checksum(&home);
     for (unsigned i = 0; i < 4; ++i) home.checksum[i] = home_hash >> (8*i);
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
+    if (ok) ok = fwrite(&open_full, 1, sizeof(open_full), file) == sizeof(open_full);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1195,6 +1222,7 @@ esp_err_t app_settings_backup_restore(void) {
     uint8_t indent = 2, rule_offset = 4, staged_shutdown = 0;
     settings_backup_indent_adjust_t adjust = {.encoded = 20};
     settings_backup_weight_t weight = {.encoded = 2};
+    settings_backup_open_full_t open_full = {.open_full = 1};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1262,6 +1290,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 14) ok = fread(&background, 1, sizeof(background), file) == sizeof(background) &&
         backup_background_valid(&background) && backup_path_valid(background.path, sizeof(background.path));
     if (ok && version >= 16) ok = fread(&home, 1, sizeof(home), file) == sizeof(home) && backup_home_valid(&home);
+    if (ok && version >= 18) ok = fread(&open_full, 1, sizeof(open_full), file) == sizeof(open_full) && backup_open_full_valid(&open_full);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1333,6 +1362,7 @@ esp_err_t app_settings_backup_restore(void) {
     // upgrades and downgrades.
     BACKUP_SET_U8(NVS_KEY_IMMERSIVE, BK_IMMERSIVE);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_OPEN_FULL, open_full.open_full);
     BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
@@ -1390,6 +1420,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_turn_effect = f[BK_TURN];
     s_reader_power_turn = f[BK_POWER_TURN];
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
+    s_reader_open_fullscreen = open_full.open_full == 1;
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;
