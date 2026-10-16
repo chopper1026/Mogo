@@ -14,6 +14,10 @@
 bool ui_font_has_text(const char *text);
 int ui_font_ascender_px(int px);
 int ui_font_text_width_px(int px, const char *text);
+/// 标题里是否有字只存在于补充位图：有则整行走补充基准字号，没有则按轮廓字号生成。
+/// Whether any title glyph lives only in the bitmap supplement: such a line takes the supplement's
+/// base size, every other line rasterizes at the target size.
+bool ui_font_title_uses_supplement(const char *text);
 /// 含补充位图的标题整行使用原生24px；轮廓字形直接按目标字号生成。
 /// Titles containing bitmap supplements use native 24px throughout; outlines rasterize at the target size.
 int ui_font_title_px(int preferred_px, const char *text);

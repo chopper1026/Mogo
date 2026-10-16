@@ -21,10 +21,11 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v19 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v19; legacy fixtures drop them all. */
+/* v15..v20 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v20; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + \
-                            sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t))
+                            sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) + \
+                            sizeof(settings_backup_title_size_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -216,6 +217,7 @@ int main(void) {
     s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
     app_settings_set_reader_open_fullscreen(false); /* v18 band remembers windowed entries */
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_MARK); /* v19 band carries the heading style */
+    app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX); /* v20 band carries the heading size */
     s_shelf_style = 3;
     s_shutdown_style = APP_SHUTDOWN_STAGED;
     s_auto_lock_minutes = 5;
@@ -356,6 +358,7 @@ int main(void) {
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
     assert(!app_settings_reader_open_fullscreen());
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_MARK);
+    assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_MAX);
     assert(s_shutdown_style == APP_SHUTDOWN_STAGED && app_settings_auto_lock_minutes() == 5);
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
@@ -376,6 +379,7 @@ int main(void) {
     // A v18 backup has no heading-style block: drop it, downgrade the magic, and expect the plain
     // default for the style while every other field still restores.
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
+    app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX);
     assert(app_settings_backup_save() == ESP_OK);
     saved = fopen(BACKUP_FILE, "r+b");
     assert(saved && fread(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
@@ -387,11 +391,14 @@ int main(void) {
                                            sizeof(settings_backup_wifi_t) + sizeof(settings_backup_background_t) +
                                            sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
-    long v19_end = ftell(saved);
-    size_t v18_tail = (size_t)(v19_end - v18_style_at - (long)sizeof(settings_backup_title_style_t));
+    long v20_end = ftell(saved);
+    /* 样式块与字号块一起丢掉：v18 两块都没有。 */
+    /* Drop the style and size blocks together: v18 has neither. */
+    const long v20_band = (long)(sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t));
+    size_t v18_tail = (size_t)(v20_end - v18_style_at - v20_band);
     uint8_t *v18_bytes = malloc(v18_tail ? v18_tail : 1);
     assert(v18_bytes);
-    assert(fseek(saved, v18_style_at + (long)sizeof(settings_backup_title_style_t), SEEK_SET) == 0 &&
+    assert(fseek(saved, v18_style_at + v20_band, SEEK_SET) == 0 &&
            fread(v18_bytes, 1, v18_tail, saved) == v18_tail);
     memcpy(legacy_header.magic, "PICOSETI", 8);
     backup_seal(&legacy_header);
@@ -408,11 +415,60 @@ int main(void) {
     assert(fseek(saved, v18_style_at, SEEK_SET) == 0);
     assert(fwrite(v18_bytes, 1, v18_tail, saved) == v18_tail);
     free(v18_bytes);
-    assert(fflush(saved) == 0 && ftruncate(fileno(saved), v19_end - (long)sizeof(settings_backup_title_style_t)) == 0 && fclose(saved) == 0);
+    assert(fflush(saved) == 0 && ftruncate(fileno(saved), v20_end - v20_band) == 0 && fclose(saved) == 0);
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
+    app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
     assert(app_settings_backup_restore() == ESP_OK);
     assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_PLAIN);
+    assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_DEFAULT);
     assert(!app_settings_reader_open_fullscreen());
+    assert(app_settings_backup_save() == ESP_OK);
+    // v19 备份有题头样式、没有字号块：只截掉字号块并把 magic 降回 'J'，样式照旧恢复，字号回落 48。
+    // A v19 backup carries the heading style but not the size block: drop only that block and lower
+    // the magic, and the style still restores while the size falls back to 48.
+    app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
+    app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MAX);
+    assert(app_settings_backup_save() == ESP_OK);
+    saved = fopen(BACKUP_FILE, "r+b");
+    assert(saved && fread(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fread(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fread(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    assert(fread(&saved_keys, 1, sizeof(saved_keys), saved) == sizeof(saved_keys));
+    assert(fread(&saved_hold, 1, sizeof(saved_hold), saved) == sizeof(saved_hold));
+    assert(fseek(saved, 0, SEEK_END) == 0);
+    long v20_size_end = ftell(saved);
+    /* 字号块夹在样式块与阅读记录之间：把记录整段前移再截尾，才是「没有字号块」的 v19 文件。 */
+    /* The size block sits between the style block and the reading history: move the history up and
+       then truncate, which is what a v19 file without a size block looks like. */
+    long v19_size_at = v18_style_at + (long)sizeof(settings_backup_title_style_t);
+    size_t v19_tail = (size_t)(v20_size_end - v19_size_at - (long)sizeof(settings_backup_title_size_t));
+    uint8_t *v19_bytes = malloc(v19_tail ? v19_tail : 1);
+    assert(v19_bytes);
+    assert(fseek(saved, v19_size_at + (long)sizeof(settings_backup_title_size_t), SEEK_SET) == 0 &&
+           fread(v19_bytes, 1, v19_tail, saved) == v19_tail);
+    memcpy(legacy_header.magic, "PICOSETJ", 8);
+    backup_seal(&legacy_header);
+    uint32_t v19_ext_hash = backup_shutdown_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2]);
+    for (int i = 0; i < 4; ++i) legacy_ext[i + 3] = (uint8_t)(v19_ext_hash >> (8 * i));
+    uint32_t v19_profile_hash = backup_profile_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2], &saved_profile);
+    for (int i = 0; i < 4; ++i) saved_profile.checksum[i] = (uint8_t)(v19_profile_hash >> (8 * i));
+    rewind(saved);
+    assert(fwrite(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fwrite(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fwrite(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    assert(fwrite(&saved_keys, 1, sizeof(saved_keys), saved) == sizeof(saved_keys));
+    assert(fwrite(&saved_hold, 1, sizeof(saved_hold), saved) == sizeof(saved_hold));
+    assert(fseek(saved, v19_size_at, SEEK_SET) == 0);
+    assert(fwrite(v19_bytes, 1, v19_tail, saved) == v19_tail);
+    free(v19_bytes);
+    assert(fflush(saved) == 0 &&
+           ftruncate(fileno(saved), v20_size_end - (long)sizeof(settings_backup_title_size_t)) == 0 &&
+           fclose(saved) == 0);
+    app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
+    app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_FRAME);
+    assert(app_settings_book_title_size() == APP_BOOK_TITLE_SIZE_DEFAULT);
     assert(app_settings_backup_save() == ESP_OK);
     // v11 没有微调块；保留映射、网络及阅读记录，微调安全回到0。
     // V11 lacks the adjustment block; retain keys/network/history, defaulting adjustment to zero.

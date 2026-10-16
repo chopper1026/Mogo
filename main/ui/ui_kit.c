@@ -345,10 +345,26 @@ void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const cha
     }
 }
 
-int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample) {
+// 与 ui_text_title_fit 同一套字号规则：内建位图字体按标题字号换算，其余用请求字号，两端夹到 12..120。
+// 字符串里有只存在于补充位图的字时整行按 supplement_px 取整，0 表示沿用 ui_font 的原生 24。
+// The same size rule as ui_text_title_fit: the builtin bitmap face converts the title size, every
+// other face takes it as is, both clamped to 12..120. A string carrying a glyph that lives only in
+// the bitmap supplement takes supplement_px for the whole line, where zero keeps ui_font's native 24.
+static int title_face_px(int preferred_px, const char *sample, int supplement_px) {
+    int px = preferred_px;
+    if (!title_uses_active_font(sample) && ui_font_has_text(sample))
+        px = supplement_px > 0 && ui_font_title_uses_supplement(sample)
+            ? supplement_px : ui_font_title_px(preferred_px, sample);
+    if (px < 12) px = 12;
+    if (px > 120) px = 120;
+    return px;
+}
+
+int ui_text_title_fit_sized(char *text, int preferred_px, int width, const char *font_sample,
+                            int supplement_px) {
     const char *sample = font_sample ? font_sample : text;
     bool builtin = !title_uses_active_font(sample) && ui_font_has_text(sample);
-    int px = builtin ? ui_font_title_px(preferred_px, sample) : preferred_px;
+    int px = builtin ? title_face_px(preferred_px, sample, supplement_px) : preferred_px;
     if (px < 12) px = 12;
     if (px > 120) px = 120;
     if (!text) return px;
@@ -358,6 +374,10 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
         text[n] = 0;
     }
     return px;
+}
+
+int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample) {
+    return ui_text_title_fit_sized(text, preferred_px, width, font_sample, 0);
 }
 
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
@@ -378,24 +398,18 @@ void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text
     }
 }
 
-// 与 ui_text_title_fit 同一套字号规则：内建位图字体按标题字号换算，其余用请求字号，两端夹到 12..120。
-// The same size rule as ui_text_title_fit: the builtin bitmap face converts the title size, every
-// other face takes it as is, both clamped to 12..120.
-static int title_face_px(int preferred_px, const char *sample) {
-    int px = !title_uses_active_font(sample) && ui_font_has_text(sample)
-        ? ui_font_title_px(preferred_px, sample) : preferred_px;
-    if (px < 12) px = 12;
-    if (px > 120) px = 120;
-    return px;
-}
-
-int ui_text_title_measure(int preferred_px, const char *text, const char *font_sample, int *out_px) {
+int ui_text_title_measure_sized(int preferred_px, const char *text, const char *font_sample,
+                                int supplement_px, int *out_px) {
     const char *sample = font_sample ? font_sample : text;
-    int px = title_face_px(preferred_px, sample);
+    int px = title_face_px(preferred_px, sample, supplement_px);
     if (out_px) *out_px = px;
     if (!text || !text[0]) return 0;
     return !title_uses_active_font(sample) && ui_font_has_text(sample)
         ? ui_font_text_width_px(px, text) : ttf_text_width_px(px, text);
+}
+
+int ui_text_title_measure(int preferred_px, const char *text, const char *font_sample, int *out_px) {
+    return ui_text_title_measure_sized(preferred_px, text, font_sample, 0, out_px);
 }
 
 void ui_text_title_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,

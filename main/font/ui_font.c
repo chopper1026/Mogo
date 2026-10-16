@@ -93,13 +93,17 @@ bool ui_font_has_text(const char *text) {
 static int clamp_px(int px) { return px < 8 ? 8 : px > 72 ? 72 : px; }
 static float scale_for(int px) { return stbtt_ScaleForPixelHeight(&s_font, (float)clamp_px(px)); }
 
-int ui_font_title_px(int preferred_px, const char *text) {
-    if (text && ready()) while (*text) {
+bool ui_font_title_uses_supplement(const char *text) {
+    if (!text || !ready()) return false;
+    while (*text) {
         uint32_t cp = next_cp(&text);
-        if (!stbtt_FindGlyphIndex(&s_font, (int)cp) && ui_hanzi_has(cp))
-            return UI_HANZI_BASE_PX;
+        if (!stbtt_FindGlyphIndex(&s_font, (int)cp) && ui_hanzi_has(cp)) return true;
     }
-    return clamp_px(preferred_px);
+    return false;
+}
+
+int ui_font_title_px(int preferred_px, const char *text) {
+    return ui_font_title_uses_supplement(text) ? UI_HANZI_BASE_PX : clamp_px(preferred_px);
 }
 
 int ui_font_ascender_px(int px) {

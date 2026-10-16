@@ -42,6 +42,22 @@ band = re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', source)
 assert band, 'heading band height'
 band_height = int(band.group(0).split()[-1])
 
+
+def numeric(name, path):
+    """从真实源码取数值常量：字号档位与带顶边距都不在测试里另抄一份。"""
+    found = re.search(r'#define ' + name + r' (\d+)', path.read_text())
+    assert found, name
+    return int(found.group(1))
+
+
+size_min = numeric('APP_BOOK_TITLE_SIZE_MIN', settings)
+size_max = numeric('APP_BOOK_TITLE_SIZE_MAX', settings)
+size_step = numeric('APP_BOOK_TITLE_SIZE_STEP', settings)
+size_default = numeric('APP_BOOK_TITLE_SIZE_DEFAULT', settings)
+block_top = numeric('READER_HEADING_BLOCK_TOP', book)
+block_height = numeric('READER_HEADING_BLOCK_HEIGHT', book)
+LEVELS = list(range(size_min, size_max + 1, size_step))
+
 with tempfile.TemporaryDirectory() as folder:
     p = Path(folder)
     (p / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
@@ -91,6 +107,11 @@ typedef struct {uint16_t x,y;} Coord_xy;
 static bool title_uses_active_font(const char *s){(void)s;return false;}
 static bool ui_font_has_text(const char *s){(void)s;return true;}
 static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
+// 补充位图字面：默认没有；用例里置真来验证「整行走补充基准字号」的接线。
+// Bitmap supplements: none by default; a case turns this on to check the whole line taking the
+// supplement's base size.
+static bool s_font_has_supplement;
+static bool ui_font_title_uses_supplement(const char *s){(void)s;return s_font_has_supplement;}
 static int ui_font_text_width_px(int px,const char *s){return ttf_text_width_px(px,s);}
 static void ui_font_measure_line_px(int px,const char *s,int *above,int *below){ttf_measure_line_px(px,s,above,below);}
 static void ui_font_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *s,int align,uint8_t ink,uint8_t paper,bool aa){(void)aa;ttf_draw_text_px(fb,x,baseline,px,s,align,ink,paper);}
@@ -105,13 +126,18 @@ void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
     for n in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
               'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width'):
         unit += function(n, kit) + '\n'
-    for n in ('ui_text_title_fit', 'ui_text_title_vc', 'title_face_px', 'ui_text_title_measure',
-              'ui_text_title_ink_vc'):
+    for n in ('title_face_px', 'ui_text_title_fit_sized', 'ui_text_title_fit', 'ui_text_title_vc',
+              'ui_text_title_measure_sized', 'ui_text_title_measure', 'ui_text_title_ink_vc'):
         unit += function(n, kit) + '\n'
     unit += styles.group(0) + '\n'
     unit += band.group(0) + '\n'
-    for n in ('copy_text', 'reader_heading_band', 'reader_heading_fit', 'draw_heading_plain',
-              'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
+    unit += f'#define READER_HEADING_BLOCK_TOP {block_top}\n'
+    unit += f'#define READER_HEADING_BLOCK_HEIGHT {block_height}\n'
+    unit += f'#define BAND_HEIGHT_EXPECTED {band_height}\n'
+    unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
+                                                settings.read_text()))
+    for n in ('copy_text', 'reader_heading_band', 'heading_len', 'heading_line', 'reader_heading_fit',
+              'draw_heading_plain', 'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
               'draw_reader_title_style'):
         unit += function(n, book) + '\n'
     unit += r'''
@@ -130,7 +156,24 @@ static void historical_plain(uint8_t *fb,EpdRect body){
     ui_hairline(fb,body.y+174,210,264,UI_GRAY_LIGHT);
 }
 static const size_t FB_BYTES=(size_t)UI_LOCK_WIDTH*UI_LOCK_HEIGHT/2;
+// 48 档的题头就是把历史那块整体移到带心：两帧必须只差这个纵向位移。
+// 平移在逻辑坐标里比：帧缓冲是旋转过的，整行搬字节并不等于图像下移。
+// The 48 px level is the historical block moved to the band's centre, so the two frames may differ
+// by that vertical offset alone. The comparison runs in logical coordinates: the framebuffer is
+// rotated, so copying whole byte rows is not an image shift.
+static const int CENTER_SHIFT=(READER_HEADING_BAND_HEIGHT-READER_HEADING_BLOCK_HEIGHT)/2-READER_HEADING_BLOCK_TOP;
 static uint8_t pixel_at(const uint8_t *frame,int x,int y){int px=x,py=y;switch(epd_get_rotation()){case EPD_ROT_PORTRAIT:px=epd_width()-y-1;py=x;break;case EPD_ROT_INVERTED_LANDSCAPE:px=epd_width()-x-1;py=epd_height()-y-1;break;case EPD_ROT_INVERTED_PORTRAIT:px=y;py=epd_height()-x-1;break;default:break;}return epd_get_pixel(px,py,epd_width(),epd_height(),frame);}
+// 4bpp 的纸色经 epd_get_pixel 就是这个值；位移带出画面的行必须是纸色。
+// The 4bpp paper value as epd_get_pixel reports it; rows the shift moves off the frame must be paper.
+static const uint8_t FRAME_PAPER=240;
+static bool equals_shifted(const uint8_t *moved,const uint8_t *origin,int dy){
+    for(int y=0;y<UI_LOCK_HEIGHT;++y)for(int x=0;x<UI_LOCK_WIDTH;++x){
+        int oy=y-dy;
+        uint8_t want=(oy>=0&&oy<UI_LOCK_HEIGHT)?pixel_at(origin,x,oy):FRAME_PAPER;
+        if(pixel_at(moved,x,y)!=want)return false;
+    }
+    return true;
+}
 // 墨迹范围：题头带内的最上、最下、最左、最右非白像素。
 // Ink extents: the topmost, lowest, leftmost and rightmost non-white pixel of the heading band.
 static void ink_bounds(const uint8_t *fb,int *top,int *bottom,int *left,int *right){
@@ -154,31 +197,69 @@ int main(int argc,char **argv){
     assert(styled&&plain);
     const EpdRect band=reader_heading_band(176);
     assert(band.height==READER_HEADING_BAND_HEIGHT);
-    assert(band.height==214);
+    assert(band.height==BAND_HEIGHT_EXPECTED);
+    unsigned combos=0;
     for(unsigned c=0;c<sizeof(CASES)/sizeof(CASES[0]);++c){
         snprintf(s_chapter_heading_label,sizeof(s_chapter_heading_label),"%s",CASES[c].label);
         snprintf(s_chapter_heading_title,sizeof(s_chapter_heading_title),"%s",CASES[c].title);
-        for(int style=0;style<APP_BOOK_TITLE_STYLE_COUNT;++style){
-            memset(styled,0xff,FB_BYTES);
-            draw_reader_title_style(styled,band,style,s_chapter_heading_label,s_chapter_heading_title);
-            int top,bottom,left,right;ink_bounds(styled,&top,&bottom,&left,&right);
-            assert(bottom>=0);
-            if(top<band.y+4||bottom>band.y+178||left<band.x||right>band.x+band.width){
-                fprintf(stderr,"style %d case %u out of band: y %d..%d x %d..%d\n",
-                        style,c,top,bottom,left,right);
-                assert(0);
+        int previous[APP_BOOK_TITLE_STYLE_COUNT]={0};
+        for(int size=APP_BOOK_TITLE_SIZE_MIN;size<=APP_BOOK_TITLE_SIZE_MAX;size+=APP_BOOK_TITLE_SIZE_STEP){
+            for(int style=0;style<APP_BOOK_TITLE_STYLE_COUNT;++style){
+                memset(styled,0xff,FB_BYTES);
+                draw_reader_title_style(styled,band,style,size,s_chapter_heading_label,s_chapter_heading_title);
+                int top,bottom,left,right;ink_bounds(styled,&top,&bottom,&left,&right);
+                assert(bottom>=0);
+                // 任何档位、任何样式都必须留在带内：上边界是带的顶边距，下边界是带底。
+                // Any level and any style has to stay inside the band: the top margin above, the
+                // band's bottom edge below.
+                if(top<band.y||bottom>band.y+band.height||
+                   left<band.x||right>band.x+band.width){
+                    fprintf(stderr,"size %d style %d case %u out of band: y %d..%d x %d..%d\n",
+                            size,style,c,top,bottom,left,right);
+                    assert(0);
+                }
+                // 字号真的作用到画面上：同一文案的墨迹随档位单调变高。
+                // The size really reaches the pixels: the same input's ink grows with the level.
+                if(size>APP_BOOK_TITLE_SIZE_MIN&&bottom-top<previous[style]){
+                    fprintf(stderr,"size %d style %d shrank: %d < %d\n",size,style,bottom-top,previous[style]);
+                    assert(0);
+                }
+                previous[style]=bottom-top;
+                ++combos;
             }
         }
-        // 默认样式与历史渲染必须一个像素都不差。
-        // The default style must not differ from the historical rendering by a single pixel.
+        // 默认档的静页余白 = 历史渲染整块下移到带心，字形与家具一个像素都不差。
+        // The plain style at the default level is the historical rendering moved to the band's
+        // centre, with every glyph and piece of furniture unchanged.
         memset(styled,0xff,FB_BYTES);
-        draw_reader_title_style(styled,band,APP_BOOK_TITLE_STYLE_PLAIN,s_chapter_heading_label,s_chapter_heading_title);
+        draw_reader_title_style(styled,band,APP_BOOK_TITLE_STYLE_PLAIN,APP_BOOK_TITLE_SIZE_DEFAULT,
+                                s_chapter_heading_label,s_chapter_heading_title);
         memset(plain,0xff,FB_BYTES);
         historical_plain(plain,band);
-        assert(!memcmp(styled,plain,FB_BYTES));
+        if(!equals_shifted(styled,plain,CENTER_SHIFT)){
+            fprintf(stderr,"case %u: the default level is not the historical block shifted by %d\n",c,CENTER_SHIFT);
+            assert(0);
+        }
     }
-    printf("PASS: %u heading inputs x %d styles inside the %d px band; plain matches the historical rendering\n",
-           (unsigned)(sizeof(CASES)/sizeof(CASES[0])),APP_BOOK_TITLE_STYLE_COUNT,READER_HEADING_BAND_HEIGHT);
+    // 含补充位图字面的行整行取补充基准（档位/2），所以编号永远不会比章名大。
+    // A line carrying a bitmap supplement takes the supplement base (level/2), so the label can never
+    // overtake the title.
+    s_font_has_supplement=true;
+    for(int size=APP_BOOK_TITLE_SIZE_MIN;size<=APP_BOOK_TITLE_SIZE_MAX;size+=APP_BOOK_TITLE_SIZE_STEP){
+        char fit[sizeof(s_chapter_heading_title)];
+        int title_px=reader_heading_fit(fit,sizeof(fit),"远方来信",size,ui_content_width(),size/2);
+        int label_px=reader_heading_fit(fit,sizeof(fit),"第十二章",size/2,ui_content_width(),size/2);
+        if(title_px!=size/2||label_px!=size/2){
+            fprintf(stderr,"size %d: supplement lines came out %d/%d, expected %d\n",
+                    size,title_px,label_px,size/2);
+            assert(0);
+        }
+    }
+    s_font_has_supplement=false;
+    printf("PASS: %u heading combinations (%u inputs x %d styles x %d sizes) inside the %d px band; the default %d px is the historical block shifted %d px to the band's centre, supplement lines stay at level/2\n",
+           combos,(unsigned)(sizeof(CASES)/sizeof(CASES[0])),APP_BOOK_TITLE_STYLE_COUNT,
+           (APP_BOOK_TITLE_SIZE_MAX-APP_BOOK_TITLE_SIZE_MIN)/APP_BOOK_TITLE_SIZE_STEP+1,
+           READER_HEADING_BAND_HEIGHT,APP_BOOK_TITLE_SIZE_DEFAULT,CENTER_SHIFT);
     free(styled);free(plain);
     return 0;
 }

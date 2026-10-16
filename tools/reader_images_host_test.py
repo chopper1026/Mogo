@@ -47,7 +47,7 @@ typedef struct {int leaf;} app_ctx_t;
 // load_chapter_at 按题头带高算预留；测试只关心图片路径，取值与固件一致即可。
 // load_chapter_at reserves the heading band height; the test only exercises image paths, so the
 // value just has to match the firmware.
-#define READER_HEADING_BAND_HEIGHT 214
+#define READER_HEADING_BAND_HEIGHT 294
 #define TAG "test"
 static void test_log(const char *tag,const char *format,...){(void)tag;(void)format;}
 #define ESP_LOGW(...) test_log(__VA_ARGS__)

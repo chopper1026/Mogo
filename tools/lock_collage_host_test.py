@@ -125,6 +125,9 @@ const char *app_settings_fonts_dir(void){return "/absent";}
 const char *app_settings_font_path(void){return "builtin";}
 bool ui_font_has_text(const char *s){(void)s;return true;}
 int ui_font_title_px(int px,const char *s){(void)s;return px;}
+// 宿主没有补充位图字库：整行永远不用补充基准。
+// The host has no bitmap supplement, so no line ever takes the supplement's base size.
+int ui_font_title_uses_supplement(const char *s){(void)s;return false;}
 int ui_font_text_width_px(int px,const char *s){(void)px;(void)s;assert(0);return 0;}
 void ui_font_measure_line_px(int px,const char *s,int *a,int *b){(void)px;(void)s;(void)a;(void)b;assert(0);}
 void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;assert(0);}

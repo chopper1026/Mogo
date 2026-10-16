@@ -156,6 +156,16 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
 /// Rasterize the active face directly with gray antialiasing at the target size, visually centered and independent of UI scaling.
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                       const char *font_sample, enum EpdFontFlags align);
+/// 与 ui_text_title_fit 同一规则，补充位图字面的基准字号由调用方给出（0 = 内建 24）。
+/// The rule of ui_text_title_fit with the bitmap supplement's base size supplied by the caller
+/// (zero keeps the builtin 24).
+int ui_text_title_fit_sized(char *text, int preferred_px, int width, const char *font_sample,
+                            int supplement_px);
+/// 与 ui_text_title_measure 同一规则，补充位图字面的基准字号由调用方给出（0 = 内建 24）。
+/// The rule of ui_text_title_measure with the bitmap supplement's base size supplied by the caller
+/// (zero keeps the builtin 24).
+int ui_text_title_measure_sized(int preferred_px, const char *text, const char *font_sample,
+                                int supplement_px, int *out_px);
 /// 标题字体测宽：与 ui_text_title_vc 同一字体，输出实际字号，供胶囊底、外框按字宽定位。
 /// Measure in the face ui_text_title_vc draws with, reporting the size actually used, so a pill
 /// or a box can wrap the text.

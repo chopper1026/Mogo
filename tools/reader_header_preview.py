@@ -128,6 +128,7 @@ int64_t ui_nav_clock_minute(void){return fake_now/60;}
 static bool title_uses_active_font(const char *s){(void)s;return false;}
 static bool ui_font_has_text(const char *s){(void)s;return true;}
 static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
+bool ui_font_title_uses_supplement(const char *s){(void)s;return false;}
 static int ui_font_text_width_px(int px,const char *s){return ttf_text_width_px(px,s);}
 static void ui_font_measure_line_px(int px,const char *s,int *above,int *below){ttf_measure_line_px(px,s,above,below);}
 static void ui_font_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *s,int align,uint8_t ink,uint8_t paper,bool aa){(void)aa;ttf_draw_text_px(fb,x,baseline,px,s,align,ink,paper);}'''

@@ -47,6 +47,7 @@ const char *app_settings_fonts_dir(void){return "/absent";}
 const char *app_settings_font_path(void){return "builtin";}
 bool ui_font_has_text(const char *s){(void)s;return true;}
 int ui_font_title_px(int px,const char *s){(void)s;return px;}
+int ui_font_title_uses_supplement(const char *s){(void)s;return false;}
 int ui_font_text_width_px(int px,const char *s){(void)px;(void)s;return 0;}
 void ui_font_measure_line_px(int px,const char *s,int *a,int *b){(void)px;(void)s;*a=0;*b=0;}
 void ui_font_draw_title_px(uint8_t *f,int x,int y,int px,const char *s,enum EpdFontFlags a){

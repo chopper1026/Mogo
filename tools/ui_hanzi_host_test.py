@@ -61,6 +61,7 @@ int main(void){
  for(unsigned i=0;i<sizeof(cps)/sizeof(cps[0]);i++){
   assert(ui_hanzi_has(cps[i])&&ui_hanzi_get(cps[i],record));
   char utf[4]={0xe0|(cps[i]>>12),0x80|((cps[i]>>6)&63),0x80|(cps[i]&63),0};assert(ui_font_has_text(utf));
+  assert(ui_font_title_uses_supplement(utf));
   if(i%487==0)for(int px=18;px<=64;px+=7){int top,bottom;ui_font_measure_line_px(px,utf,&top,&bottom);assert(top>0&&bottom>=0);assert(ui_font_text_width_px(px,utf)>0);
    painted=0;ui_font_draw_text_px(&fb,100,100,px,utf,EPD_DRAW_ALIGN_LEFT,0,15,false);assert(painted>0);
    assert(ui_font_title_px(px,utf)==24);memset(actual,0,sizeof(actual));capture=true;
@@ -70,7 +71,9 @@ int main(void){
     assert(actual[y*192+x]==expected);}}
  }
  assert(ui_font_title_px(48,"ABC")==48);
- puts("Han supplement: PASS (actual decoder/cache, common glyphs, rendering, OOM and metrics)");
+ assert(!ui_font_title_uses_supplement("ABC")&&!ui_font_title_uses_supplement(NULL));
+ assert(!ui_font_title_uses_supplement(""));
+ puts("Han supplement: PASS (actual decoder/cache, common glyphs, rendering, supplement detection, OOM and metrics)");
 }
 '''.replace('TEST_CP',str(chars[0])).replace('CPS',','.join(map(str,chars)))
  (work/'test.c').write_text(unit)

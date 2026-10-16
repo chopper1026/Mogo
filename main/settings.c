@@ -89,6 +89,7 @@
 #define NVS_KEY_BOOK_FONTS "bk_fonts"
 #define NVS_KEY_BOOK_VERTICAL "bk_vert"
 #define NVS_KEY_BOOK_TITLE_STYLE "bk_title"
+#define NVS_KEY_BOOK_TITLE_SIZE "bk_tsize"
 #define FONT_PATH_MAX 160
 #define MEDIA_DIR_MAX 96
 
@@ -142,6 +143,24 @@ static bool s_book_vertical;
 // 题头样式默认「静页余白」：与历史渲染一致，升级后画面不变。
 // The heading style defaults to plain, the historical rendering, so upgrading changes nothing.
 static uint8_t s_book_title_style = APP_BOOK_TITLE_STYLE_DEFAULT;
+// 题头字号默认基准档：48px 就是历史尺寸，升级后题头只跟着带高居中。
+// The heading size defaults to the reference level: 48 px is the historical size, so upgrading only
+// centres the heading in the taller band.
+static uint8_t s_book_title_size = APP_BOOK_TITLE_SIZE_DEFAULT;
+
+// 题头字号只认合法档位：低于下界的夹到最近一档（0 视为未设置，回到基准档），高于上界的夹到上界，
+// 中间值取最近的档。NVS、备份与设置写入都过这里。
+// The heading size only takes legal levels: anything below the range snaps to the nearest level (zero
+// counts as unset and returns to the reference), anything above clamps to the top, and values in
+// between snap to the nearest step. NVS, restore and the setter all come through here.
+static uint8_t book_title_size_snap(unsigned px) {
+    if (px == 0) return APP_BOOK_TITLE_SIZE_DEFAULT;
+    if (px <= APP_BOOK_TITLE_SIZE_MIN) return APP_BOOK_TITLE_SIZE_MIN;
+    if (px >= APP_BOOK_TITLE_SIZE_MAX) return APP_BOOK_TITLE_SIZE_MAX;
+    unsigned step = (px - APP_BOOK_TITLE_SIZE_MIN + APP_BOOK_TITLE_SIZE_STEP / 2) /
+                    APP_BOOK_TITLE_SIZE_STEP;
+    return (uint8_t)(APP_BOOK_TITLE_SIZE_MIN + step * APP_BOOK_TITLE_SIZE_STEP);
+}
 static uint8_t s_book_tracking = 2, s_book_reading_line, s_book_rule_offset = 4;
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
@@ -328,6 +347,9 @@ void app_settings_init(void) {
     uint8_t title_style = APP_BOOK_TITLE_STYLE_DEFAULT;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TITLE_STYLE, &title_style) == ESP_OK &&
         title_style < APP_BOOK_TITLE_STYLE_COUNT) s_book_title_style = title_style;
+    uint8_t title_size = 0;
+    if (nvs_get_u8(h, NVS_KEY_BOOK_TITLE_SIZE, &title_size) == ESP_OK)
+        s_book_title_size = book_title_size_snap(title_size);
     uint8_t tracking = 2, reading_line = 0, rule_offset = 4, indent = 2, indent_adjust = 20;
     if (nvs_get_u8(h, NVS_KEY_BOOK_TRACK, &tracking) == ESP_OK && tracking <= 4)
         s_book_tracking = tracking;
@@ -725,6 +747,13 @@ void app_settings_set_book_title_style(uint8_t style) {
     s_book_title_style = style;
     nvs_put_u8(NVS_KEY_BOOK_TITLE_STYLE, style);
 }
+uint8_t app_settings_book_title_size(void) { return s_book_title_size; }
+void app_settings_set_book_title_size(uint8_t px) {
+    px = book_title_size_snap(px);
+    if (s_book_title_size == px) return;
+    s_book_title_size = px;
+    nvs_put_u8(NVS_KEY_BOOK_TITLE_SIZE, px);
+}
 bool app_settings_ble_turner(void) { return s_ble_turner; }
 app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
@@ -964,6 +993,21 @@ static bool backup_title_style_valid(const settings_backup_title_style_t *style)
     for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)style->checksum[i] << (8 * i);
     return style->style < APP_BOOK_TITLE_STYLE_COUNT && stored == backup_title_style_checksum(style);
 }
+// v20 追加章节题头字号；旧备份回落基准档 48px。
+// V20 appends the chapter heading size; older backups fall back to the 48 px reference level.
+typedef struct { uint8_t px, checksum[4]; } settings_backup_title_size_t;
+static uint32_t backup_title_size_checksum(const settings_backup_title_size_t *size) {
+    return (2166136261u ^ size->px) * 16777619u;
+}
+static bool backup_title_size_valid(const settings_backup_title_size_t *size) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)size->checksum[i] << (8 * i);
+    // 只认正好落在档位上的字号：备份里的数就是画面上的档位，不猜中间值。
+    // Only an exact level is accepted: the number in the backup is the level on screen, never a guess.
+    return size->px >= APP_BOOK_TITLE_SIZE_MIN && size->px <= APP_BOOK_TITLE_SIZE_MAX &&
+           !((size->px - APP_BOOK_TITLE_SIZE_MIN) % APP_BOOK_TITLE_SIZE_STEP) &&
+           stored == backup_title_size_checksum(size);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -989,7 +1033,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1069,7 +1113,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETJ", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETK", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1140,6 +1184,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_title_style_t title_style = {.style = s_book_title_style};
     uint32_t title_style_hash = backup_title_style_checksum(&title_style);
     for (unsigned i = 0; i < 4; ++i) title_style.checksum[i] = (uint8_t)(title_style_hash >> (8 * i));
+    settings_backup_title_size_t title_size = {.px = s_book_title_size};
+    uint32_t title_size_hash = backup_title_size_checksum(&title_size);
+    for (unsigned i = 0; i < 4; ++i) title_size.checksum[i] = (uint8_t)(title_size_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1166,6 +1213,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&home, 1, sizeof(home), file) == sizeof(home);
     if (ok) ok = fwrite(&open_full, 1, sizeof(open_full), file) == sizeof(open_full);
     if (ok) ok = fwrite(&title_style, 1, sizeof(title_style), file) == sizeof(title_style);
+    if (ok) ok = fwrite(&title_size, 1, sizeof(title_size), file) == sizeof(title_size);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1245,6 +1293,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_weight_t weight = {.encoded = 2};
     settings_backup_open_full_t open_full = {.open_full = 1};
     settings_backup_title_style_t title_style = {.style = APP_BOOK_TITLE_STYLE_DEFAULT};
+    settings_backup_title_size_t title_size = {.px = APP_BOOK_TITLE_SIZE_DEFAULT};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1314,6 +1363,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 16) ok = fread(&home, 1, sizeof(home), file) == sizeof(home) && backup_home_valid(&home);
     if (ok && version >= 18) ok = fread(&open_full, 1, sizeof(open_full), file) == sizeof(open_full) && backup_open_full_valid(&open_full);
     if (ok && version >= 19) ok = fread(&title_style, 1, sizeof(title_style), file) == sizeof(title_style) && backup_title_style_valid(&title_style);
+    if (ok && version >= 20) ok = fread(&title_size, 1, sizeof(title_size), file) == sizeof(title_size) && backup_title_size_valid(&title_size);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1386,6 +1436,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_STATUS, backup.flags[BK_IMMERSIVE] ? 0 : 1);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_OPEN_FULL, open_full.open_full);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_STYLE, title_style.style);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_TITLE_SIZE, title_size.px);
     BACKUP_SET_U8(NVS_KEY_BOOK_TRACK, BK_TRACKING);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT, indent);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_BOOK_INDENT_ADJUST, adjust.encoded);
@@ -1445,6 +1496,7 @@ esp_err_t app_settings_backup_restore(void) {
     s_reader_statusbar = f[BK_IMMERSIVE] == 0;
     s_reader_open_fullscreen = open_full.open_full == 1;
     s_book_title_style = title_style.style;
+    s_book_title_size = title_size.px;
     s_book_tracking = f[BK_TRACKING];
     s_book_indent = indent;
     s_book_indent_adjust = adjust.encoded;

@@ -155,6 +155,18 @@ void app_settings_set_book_fonts(bool on);
 /// body layout and illustration pagination are affected.
 bool app_settings_book_vertical(void);
 void app_settings_set_book_vertical(bool on);
+/// 章节题头字号：章名字号 px 五档，编号恒为它的一半，带内几何按它缩放；默认档等于历史尺寸。
+/// Chapter heading size: five levels of chapter-title px with the label always half of it, scaling
+/// the geometry inside the heading band; the default level is the historical size.
+#define APP_BOOK_TITLE_SIZE_MIN 36      ///< 最小章名 px / Smallest chapter-title px
+#define APP_BOOK_TITLE_SIZE_MAX 60      ///< 最大章名 px / Largest chapter-title px
+#define APP_BOOK_TITLE_SIZE_STEP 6      ///< 档位步长 / Step between levels
+#define APP_BOOK_TITLE_SIZE_DEFAULT 48  ///< 历史尺寸，升级不变画面 / Historical size
+/// 阅读页章节题头字号（章名 px）；越界值夹到最近一档，0 视为未设置并回到基准档。
+/// Reader chapter heading size in chapter-title px; out-of-range values snap to the nearest level
+/// and zero counts as unset and returns to the reference.
+uint8_t app_settings_book_title_size(void);
+void app_settings_set_book_title_size(uint8_t px);
 /// 章节题头样式；静页余白是历史渲染，默认沿用，老用户升级后画面不变。
 /// Chapter heading styles; plain is the historical rendering and stays the default, so upgrading
 /// changes nothing on screen.

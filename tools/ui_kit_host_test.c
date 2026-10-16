@@ -34,6 +34,7 @@ bool ui_font_has_text(const char *text) {
 }
 int ui_font_text_width_px(int px, const char *text) { return characters(text) * px / 2; }
 int ui_font_title_px(int px, const char *text) { return strchr(text, 'Z') ? 24 : px; }
+bool ui_font_title_uses_supplement(const char *text) { return strchr(text, 'Z') != NULL; }
 int ttf_text_width_px(int px, const char *text) { return characters(text) * px * 3 / 4; }
 void ui_font_measure_line_px(int px, const char *text, int *above, int *below) {
     (void)text; *above = px * 3 / 4; *below = px / 4;

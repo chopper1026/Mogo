@@ -99,6 +99,11 @@ typedef struct {uint16_t x,y;} Coord_xy;
 static bool title_uses_active_font(const char *s){(void)s;return false;}
 static bool ui_font_has_text(const char *s){(void)s;return true;}
 static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
+// 补充位图字面：默认没有；用例里置真来验证「整行走补充基准字号」的接线。
+// Bitmap supplements: none by default; a case turns this on to check the whole line taking the
+// supplement's base size.
+static bool s_font_has_supplement;
+static bool ui_font_title_uses_supplement(const char *s){(void)s;return s_font_has_supplement;}
 static int ui_font_text_width_px(int px,const char *s){return ttf_text_width_px(px,s);}
 static void ui_font_measure_line_px(int px,const char *s,int *above,int *below){ttf_measure_line_px(px,s,above,below);}
 static void ui_font_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *s,int align,uint8_t ink,uint8_t paper,bool aa){(void)aa;ttf_draw_text_px(fb,x,baseline,px,s,align,ink,paper);}
@@ -116,8 +121,8 @@ static void save(const char *path,uint8_t *frame){FILE *f=fopen(path,"wb");asser
 def geometry_slices():
     """题头带与四款样式的绘制函数：阅读页与面板预览用的是同一份。"""
     return ''.join(function(n, BOOK) + '\n' for n in (
-        'copy_text', 'reader_heading_band', 'reader_heading_fit', 'draw_heading_plain',
-        'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
+        'copy_text', 'reader_heading_band', 'heading_len', 'heading_line', 'reader_heading_fit',
+        'draw_heading_plain', 'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
         'draw_reader_title_style'))
 
 
@@ -125,8 +130,8 @@ def kit_slices():
     return ''.join(function(n, KIT) + '\n' for n in (
         'clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
         'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width',
-        'ui_text_title_fit', 'ui_text_title_vc', 'title_face_px', 'ui_text_title_measure',
-        'ui_text_title_ink_vc'))
+        'title_face_px', 'ui_text_title_fit_sized', 'ui_text_title_fit', 'ui_text_title_vc',
+        'ui_text_title_measure_sized', 'ui_text_title_measure', 'ui_text_title_ink_vc'))
 
 
 def epdiy_slices():
@@ -169,17 +174,31 @@ def style_unit():
     unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
     unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', BOOK.read_text()).group(0) + '\n'
+    # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
+    # The band's top margin and the size levels come from the real source too; the geometry scales
+    # with them.
+    unit += ''.join(m + '\n' for m in re.findall(r'#define READER_HEADING_BLOCK_\w+ \d+',
+                                                 BOOK.read_text()))
+    unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
+                                                 (ROOT / 'main/settings.h').read_text()))
     unit += geometry_slices()
     unit += r'''
 int main(int argc,char **argv){
- assert(argc==5);assert(ttf_font_open(argv[1])==ESP_OK);
+ assert(argc==7);assert(ttf_font_open(argv[1])==ESP_OK);
  snprintf(s_chapter_heading_label,sizeof(s_chapter_heading_label),"%s",argv[2]);
  snprintf(s_chapter_heading_title,sizeof(s_chapter_heading_title),"%s",argv[3]);
+ // 档位与带高都是运行期入参：0 表示用源码里的值，其余按调用方给的画。
+ // Both the size level and the band height are runtime arguments: zero keeps the source value, any
+ // other number paints what the caller asked for.
+ int size=atoi(argv[5]),height=atoi(argv[6]);
+ if(size<=0)size=APP_BOOK_TITLE_SIZE_DEFAULT;
+ EpdRect band=reader_heading_band(176);
+ if(height>0)band.height=height;
  uint8_t *fb=malloc(684*1216/2);assert(fb);
  char path[256];
  for(int style=0;style<APP_BOOK_TITLE_STYLE_COUNT;++style){
    memset(fb,0xff,684*1216/2);
-   draw_reader_title_style(fb,reader_heading_band(176),style,s_chapter_heading_label,s_chapter_heading_title);
+   draw_reader_title_style(fb,band,style,size,s_chapter_heading_label,s_chapter_heading_title);
    snprintf(path,sizeof(path),"%s/style%d.raw",argv[4],style);
    save(path,fb);
  }
@@ -192,11 +211,16 @@ int main(int argc,char **argv){
 def panel_unit():
     """选择面板整屏画一次；设置与书本类型由命令行的三档驱动。"""
     unit = host_preamble()
+    # 档位常量要排在面板桩前面：桩里报告的「当前档」就读它。
+    # The size levels come before the panel stubs, which report the current level.
+    unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
+                                                 (ROOT / 'main/settings.h').read_text()))
     unit += r'''
 static unsigned style_selected=3;
 static bool book_vertical;
 static int book_kind_value=BOOK_KIND_EPUB;
 static unsigned app_settings_book_title_style(void){return style_selected;}
+static unsigned app_settings_book_title_size(void){return APP_BOOK_TITLE_SIZE_DEFAULT;}
 static bool app_settings_book_vertical(void){return book_vertical;}
 static int book_kind(void){return book_kind_value;}
 static unsigned app_settings_system_font_size(void){return 100;}
@@ -214,6 +238,11 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     unit += enum_block(ROOT / 'main/settings.h', 'APP_BOOK_TITLE_STYLE_EMBLEM',
                        'app_book_title_style_t')
     unit += re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', BOOK.read_text()).group(0) + '\n'
+    # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
+    # The band's top margin and the size levels come from the real source too; the geometry scales
+    # with them.
+    unit += ''.join(m + '\n' for m in re.findall(r'#define READER_HEADING_BLOCK_\w+ \d+',
+                                                 BOOK.read_text()))
     unit += string_table(BOOK, 's_title_style_names')
     unit += string_table(BOOK, 's_title_style_details')
     # 面板的几何常量从源码取，卡片与窗口位置不另抄。
@@ -226,7 +255,7 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     for n in ('reader_panel_text_vc', 'draw_sheet', 'draw_sheet_back',
               'title_style_card_rect', 'title_style_window_rect', 'reader_title_style_name',
               'title_style_note', 'title_style_preview_label', 'title_style_preview_title',
-              'draw_title_style_picker'):
+              'heading_size_rect', 'draw_heading_size_row', 'draw_title_style_picker'):
         unit += function(n, BOOK) + '\n'
     unit += r'''
 int main(int argc,char **argv){
@@ -260,6 +289,12 @@ def main():
     # from the bitmap supplement while the host preview would show a blank box.
     parser.add_argument('--title', default='远方来信')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/title-style-preview/all-styles.png')
+    # 字号档与带高：默认取源码里的值，给数就画那个档（对比图靠它摆出前后两版）。
+    # Size level and band height: the source values by default, any given number paints that level,
+    # which is how the before/after sheets are laid out.
+    parser.add_argument('--size', type=int, default=0)
+    parser.add_argument('--band', type=int, default=0)
+    parser.add_argument('--full', action='store_true', help='每个样式另存整页 PNG')
     args = parser.parse_args()
 
     from PIL import Image
@@ -274,12 +309,14 @@ def main():
         write_shims(work)
         compile_unit(work, style_unit())
         subprocess.run([str(work / 'test'), str(args.font.resolve()), args.label, args.title,
-                        str(work)], check=True)
+                        str(work), str(args.size), str(args.band)], check=True)
         crops, bands = [], []
         for tag, name, style in STYLES:
             page = cropped((work / f'style{style}.raw').read_bytes(), paper)
             crops.append(page.crop(CROP))
             crops[-1].save(out.with_name(f'{tag}.png'))
+            if args.full:
+                page.save(out.with_name(f'{tag}-page.png'))
             bands.append(page.crop((36, BAND_TOP + BAND_WINDOW_TOP, 648,
                                     BAND_TOP + BAND_WINDOW_TOP + BAND_CROP_HEIGHT)))
         sheet = Image.new('L', (684, crops[0].height * len(crops) + 2 * (len(crops) - 1)), 128)
@@ -300,7 +337,8 @@ def main():
             paper(Image.frombytes('L', (684, 1216), target.read_bytes())).save(
                 out.with_name(f'{tag}.png'))
 
-    print(f"saved {out}, {len(STYLES)} single-style PNGs and 3 picker renders next to it")
+    print(f"saved {out}, {len(STYLES)} single-style PNGs and 3 picker renders next to it"
+          + (f" (size {args.size or 'source'}, band {args.band or 'source'})" if args.size or args.band else ""))
 
 
 if __name__ == '__main__':
