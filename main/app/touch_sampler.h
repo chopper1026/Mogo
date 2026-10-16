@@ -11,7 +11,7 @@
 
 #include "cst836u.h"
 
-// 单帧 8 字节：手势机与去抖全部以 ms 粒度工作（长按 500ms、双击窗口 340ms 均用
+// 单帧 8 字节：手势机与去抖全部以 ms 粒度工作（长按 500ms 等窗口均用
 // ctx.now_ms），µs 精度无消费者。t_ms 取 esp_timer 毫秒的低 32 位，49.7 天回绕
 // 对存活期仅毫秒级的队列无害（回放值在回绕点两侧仍单调，手势机倒退保护不触发）。
 // / 8-byte frame: every consumer works at ms granularity. t_ms is the low 32

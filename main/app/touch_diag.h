@@ -15,7 +15,7 @@
  *   PRESS x= y=     触摸按下边沿
  *   GEND t=         手势终态（TAP/SWIPE/LONG/CANCEL 及位移、时长）
  *   KILL_BY_ERR     手势跟踪期间 I2C 出错被强制取消（整次点击报废的特征）
- *   TAPZ / PENDING  阅读页点击分区、双击挂起的建立/冲销/到期执行
+ *   TAPZ out=       阅读页点击分区结果（上一页/下一页/无）
  *   TURN dir=       turn_page 入口
  *   PRESENT ms=     一次 app_present 刷屏耗时 >100ms
  *   STATS ...       每 60s 汇总计数

@@ -12,7 +12,7 @@
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
  * 普通翻页只刷新正文与页脚；手动或周期清残影整屏全刷。
- * 用户修订：正文中间双击固定切换全屏，单击左右各半或上1/3下2/3翻页，不受按键配置影响。
+ * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换，中间双击已取消。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
@@ -51,8 +51,8 @@
  * User revision: adopt PR9's book_layout unchanged; callers only adapt bitmap caching and context lifetimes.
  * Authorized keyboard revision: titles and search share T9/QWERTY, bilingual offline phrase candidates; body layout stays intact.
  * 用户修订：输入不重画题头、封面或正文，只刷新输入变化区域，退出后释放查字缓存。
- * 用户修订：新开书默认全屏；双击中间切换，翻页关闭工具栏并回全屏；重排以已选目标页的文字位置为锚，不跳过未读文字。
- * User revision: new books open full screen; center double taps toggle it, turns dismiss tools and return to full screen; reflow anchors the selected destination before changing geometry so unread text is not skipped.
+ * 用户修订：新开书沿用记住的全屏偏好（默认全屏）；翻页收起工具栏与滑块但不改变全屏状态；重排以已选目标页的文字位置为锚，不跳过未读文字。
+ * User revision: new books follow the remembered full-screen preference (default on); turns dismiss the toolbar and sliders but keep the current full-screen state; reflow anchors the selected destination before changing geometry so unread text is not skipped.
  * 用户修订：字重用横向减/加胶囊，每次微调1/16像素覆盖率；保持字形比例/字宽，不加载额外整份字库。
  * User revision: a horizontal minus/plus pill adjusts coverage by 1/16 pixel per tap, preserving advances/proportions without another font.
  * 用户确认：字体/字重与书内字体/排版分别并排，移除阅读背景入口；字号和阅读线继续可调。
@@ -65,7 +65,7 @@
  * Shake is off by default: left/right impulses turn back/forward, suppressing touch and rebound; exit restores the sensor and sleeps it. Render only paints.
  * Prefetch overlaps synchronous output and stops between rows; no font/chapter resources survive presentation.
  * Ordinary turns refresh only body and footer; manual and periodic ghost cleanup refresh the entire screen.
- * User revision: center body double taps always toggle full screen; single taps use halves or upper 1/3/lower 2/3 independently of key mappings.
+ * User revision: single body taps use halves or upper 1/3/lower 2/3 independently of key mappings; full screen is toggled from the toolbar button or a full-screen key action, and center double taps are gone.
  * Short key actions are configurable with two presets; middle holds are configurable and default to home. The reader has no bottom-right menu icon.
  * User-authorized management shows full details before separate clear/delete confirmations; retain failed saves for retry without pruning other books.
  * User revision: single-book actions use a shelf dialog; full management is for batches. Paging/sorting preserve selection; filtering/applied search and rescanning clear it.
@@ -2405,7 +2405,7 @@ static void draw_key_settings(uint8_t *fb) {
     ui_text_box(fb,(EpdRect){322,652,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
     ui_draw_icon(fb, 625, 679, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     reader_panel_text(fb, 58, 710, 19, "点击选择长按功能，例如返回主页", EPD_DRAW_ALIGN_LEFT, false);
-    reader_panel_text_vc(fb, 342, 775, 20, "屏幕中间双击切换全屏，不受按键设置影响", EPD_DRAW_ALIGN_CENTER, false);
+    reader_panel_text_vc(fb, 342, 775, 20, "全屏由工具栏按钮或按键动作切换", EPD_DRAW_ALIGN_CENTER, false);
     for (unsigned preset = 1; preset <= 2; ++preset) {
         EpdRect card = reader_key_preset_card(preset);
         bool selected = reader_key_preset_selected(preset);

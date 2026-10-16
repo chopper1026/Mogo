@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 全屏改由阅读工具栏的「全屏」按钮或按键动作切换，正文中间双击不再生效；「全屏沉浸」开关更名为「状态栏」，决定全屏时是否占用顶部状态栏。翻页只收起工具栏与滑块，不再把窗口化阅读拉回全屏；开书沿用上次记住的全屏偏好（默认全屏）。中部单击分区不变。
+  Full screen now comes from the reader toolbar's Full screen button or a key action, and the center double tap no longer applies; the immersive toggle is renamed Status bar and decides whether full screen keeps the top status bar. A page turn only dismisses the toolbar and sliders instead of pulling windowed reading back to full screen, and books open with the remembered full-screen preference (default on). Center tap zones are unchanged.
 - 阅读页眉去掉返回键与收藏图标：书名移到左侧，右侧改为状态栏同款的时间与电池，翻页正文位置不变。「返回主页」按键按进入阅读的来路回退（首页最近阅读回首页，书架回书架，默认键位不变），整本收藏的开关移到书架长按「图书详情」，收藏置顶与封面角标保持原有行为。
   The reader header drops its back and favorite controls: the title moves left and the right side shows the status-bar clock and battery, with the body position unchanged. The "home" key returns along the entry path (home recent-reading goes home, the shelf returns to the shelf; defaults untouched), and the whole-book favorite toggle now lives in the shelf details panel while favorite-first sorting and cover badges keep working.
 - 接入 PR #34：修正竖排阅读辅助线的位置和虚线节奏，补齐横线类符号旋转，并按字体原生全角步进对齐章节数字编号。
