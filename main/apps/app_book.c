@@ -4698,6 +4698,10 @@ static app_redraw_t toggle_reader_fullscreen(app_ctx_t* ctx) {
     // 切换成功即落盘偏好；重排失败的回滚路径不写。/ Persist the preference on a successful
     // toggle only; the failed-reflow rollback path never writes.
     app_settings_set_reader_open_fullscreen(s_reader_fullscreen);
+    // 书架点击直接调 open_book，只读这个待开值而不重新读设置；不同步的话关书再进会回到切换前的模式。
+    // A shelf tap calls open_book directly and reads this pending value without re-reading the
+    // setting, so without this sync closing and reopening the book restores the pre-toggle mode.
+    s_requested_fullscreen = s_reader_fullscreen;
     save_progress();
     return APP_REDRAW_PAGE;
 }

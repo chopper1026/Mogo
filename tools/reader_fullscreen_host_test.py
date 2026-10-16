@@ -125,6 +125,11 @@ int main(void){
  assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&s_reader_fullscreen&&test_open_full);
  assert(book_layout_page_start_offset(s_page)<=fs_anchor&&fs_anchor<book_layout_page_start_offset(s_page)+layout_span&&saves==1);
  reset(true,false,2,0);assert(toggle_reader_fullscreen(&ctx)==APP_REDRAW_PAGE&&!s_reader_fullscreen&&!test_open_full);
+ // 书架点击不经过 request_open，只读 s_requested_fullscreen；切换全屏后这个待开值必须跟着变，
+ // 否则关书再进来还是切换前的模式。
+ // A shelf tap skips the open request path and reads s_requested_fullscreen alone, so a toggle
+ // has to move it too; otherwise reopening after closing the book restores the pre-toggle mode.
+ assert(!s_requested_fullscreen);
  // 12:55 a+b 之后翻页保持当前模式：非全屏不再自动切全屏；reset 留着 slider=2，
  // 翻页收滑块即返回 PAGE 且不跑水波；水波正路径由下方 slider=-1 的场景覆盖。
  // Since a+b a turn keeps the current mode. reset leaves slider=2, so every turn collapses
