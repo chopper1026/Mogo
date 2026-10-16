@@ -239,6 +239,13 @@ int main(void) {
     assert(update_display_water_turn(&hl, (EpdRect){0, 0, 16, 16}, E0470_TURN_RTL) == EPD_DRAW_SUCCESS);
     assert(water_calls == 2 && clears == 1 && white_baseline && correct_target_at_draw);
     assert(last_mode == MODE_GC16 && !memcmp(back, target, FB_BYTES));
+    memcpy(front,target,FB_BYTES);memset(back,0x55,FB_BYTES);draws=clears=full_draws=0;
+    // 阅读全刷与 rc90 一致：一轮原表 GC16，不先 epd_clear，也不追加白底文字输出。
+    // Reader full refresh matches rc90: one original-table GC16 output, without epd_clear or a white-baseline text pass.
+    assert(update_display_full(&hl)==EPD_DRAW_SUCCESS);
+    assert(clears==0&&draws==1&&full_draws==1&&last_mode==MODE_GC16&&!white_baseline&&correct_target_at_draw);
+    assert(waveform_at_draw==&E0470_WAVEFORM);
+    assert(!memcmp(front,target,FB_BYTES)&&!memcmp(back,target,FB_BYTES));
     // 手动修复保留目标页和底栏，只做一次最终整屏输出；成功后局部更新不再被迫全刷。
     // Manual repair preserves the target and navigation with one final full output, then allows local updates again.
     checking_repair = true;

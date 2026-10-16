@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""中文：验证正式rc92阅读刷新回退及真实推屏路由。/ English: Verify official rc92 reader rollback and actual presenter routing.
+"""中文：验证 rc90 阅读全刷与保留的 rc92 普通翻页推屏路由。/ English: Verify the rc90 reader full refresh and the preserved rc92 ordinary-turn presenter routing.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -7,23 +7,31 @@ import subprocess,tempfile
 from home_cover_cache_host_test import function
 root=Path(__file__).resolve().parents[1]
 release='4bd2b9e808c214c7606cb4c31e606af146d48bce'
+full_release='v0.3.3-rc90'
 with tempfile.TemporaryDirectory(dir='/private/tmp') as folder:
     original=Path(folder)/'book.c'
     original.write_bytes(subprocess.check_output(['git','show',release+':main/apps/app_book.c'],cwd=root))
     # 本树按 2026-10-15 用户决策保留了窗口化几何与状态栏开关，与 rc92 不同的函数不再逐字
-    # 比对；周期清残影按 2026-10-16 用户决策回到 rc92 的整屏 GC16，不再有独立清屏路径。
+    # 比对；周期清残影按 2026-10-16 用户决策回到 rc90/rc92 的整屏 GC16，不再有独立清屏路径。
     # This tree keeps the 2026-10-15 windowed geometry and status-bar switch, so those functions
-    # are not byte-compared. Periodic cleanup returned to rc92's whole-screen GC16 per the
+    # are not byte-compared. Periodic cleanup returned to rc90/rc92's whole-screen GC16 per the
     # 2026-10-16 decision, so it has no separate display path again.
     for name in ('reader_fullscreen_progress_area','reader_clock_tick','reader_manual_refresh'):
         assert function(name,root/'main/apps/app_book.c')==function(name,original),name
+    # 全刷基准回到 rc90：本树只允许多出这三行固定前置动作。
+    # The full-refresh baseline is rc90 again; this tree may only add those three fixed preamble lines.
+    original.write_bytes(subprocess.check_output(['git','show',full_release+':main/display.c'],cwd=root))
+    current=function('update_display_full_unlocked',root/'main/display.c')
+    for line in ('    s_full_refresh_requested = false;\n','    display_main_transition_cancel();\n','    epd_hl_waveform(hl, &E0470_WAVEFORM);\n'):
+        current=current.replace(line,'')
+    assert current==function('update_display_full_unlocked',original)
 for rel in ('main/display_reader_waveform.c','main/display_reader_waveform.h'):
     assert (root/rel).read_bytes()==subprocess.check_output(['git','show',release+':'+rel],cwd=root),rel
 assert not subprocess.check_output(['git','diff',release,'--','components/e0470_page_turn','components/e0470_epaper_waveform'],cwd=root)
 display_source=(root/'main/display.c').read_text()
 assert 'update_display_reader_gc16' not in display_source
 assert 'update_display_reader_cleanup' not in display_source
-print('PASS: reader refresh branches, turn/regions, manual cleanup, clock and waveform match official rc92 (bounded overlapped-prefetch hook excepted); panel/ripple components unchanged',flush=True)
+print('PASS: reader full refresh matches rc90 original GC16; turn regions, clock, manual refresh and reader waveform match rc92 (bounded overlapped-prefetch hook excepted); panel/ripple components unchanged',flush=True)
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
