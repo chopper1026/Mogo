@@ -10,17 +10,19 @@ release='4bd2b9e808c214c7606cb4c31e606af146d48bce'
 with tempfile.TemporaryDirectory(dir='/private/tmp') as folder:
     original=Path(folder)/'book.c'
     original.write_bytes(subprocess.check_output(['git','show',release+':main/apps/app_book.c'],cwd=root))
-    # 本树按 2026-10-15 用户决策保留了窗口化几何、状态栏开关与从白 GL16 清屏（defa639），
-    # 与 rc92 不同的函数不再逐字比对；保留面板组件与阅读波形文件不变的守门。
-    # This tree keeps the 2026-10-15 windowed geometry, status-bar switch and from-white GL16
-    # cleanup (defa639) per the user's decision, so those functions are not byte-compared;
-    # the panel components and reader waveform files remain gated.
+    # 本树按 2026-10-15 用户决策保留了窗口化几何与状态栏开关，与 rc92 不同的函数不再逐字
+    # 比对；周期清残影按 2026-10-16 用户决策回到 rc92 的整屏 GC16，不再有独立清屏路径。
+    # This tree keeps the 2026-10-15 windowed geometry and status-bar switch, so those functions
+    # are not byte-compared. Periodic cleanup returned to rc92's whole-screen GC16 per the
+    # 2026-10-16 decision, so it has no separate display path again.
     for name in ('reader_fullscreen_progress_area','reader_clock_tick','reader_manual_refresh'):
         assert function(name,root/'main/apps/app_book.c')==function(name,original),name
 for rel in ('main/display_reader_waveform.c','main/display_reader_waveform.h'):
     assert (root/rel).read_bytes()==subprocess.check_output(['git','show',release+':'+rel],cwd=root),rel
 assert not subprocess.check_output(['git','diff',release,'--','components/e0470_page_turn','components/e0470_epaper_waveform'],cwd=root)
-assert 'update_display_reader_gc16' not in (root/'main/display.c').read_text()
+display_source=(root/'main/display.c').read_text()
+assert 'update_display_reader_gc16' not in display_source
+assert 'update_display_reader_cleanup' not in display_source
 print('PASS: reader refresh branches, turn/regions, manual cleanup, clock and waveform match official rc92 (bounded overlapped-prefetch hook excepted); panel/ripple components unchanged',flush=True)
 unit=r'''
 #include <assert.h>
@@ -70,7 +72,7 @@ static void guard_draw_result(void *hl,enum EpdDrawError err){(void)hl;(void)err
 static int e0470_page_turn_tick_us(void){return 11090;}
 static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 #define display_main_transition_shelf_page() ((void)0)
-#define update_display_reader_cleanup(...) push(11)
+/* 11 已停用：周期清残影与手动全刷共用整屏 GC16。/ 11 retired: periodic cleanup shares the manual whole-screen GC16. */
 #define update_display_full(...) push(12)
 #define update_display_area_diff_with(...) push(13)
 #define update_display_area_full_with(...) push(14)
@@ -98,7 +100,7 @@ int main(void){
  }
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_cleanup=true;
-  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==11&&s_reader_text_frame);
+  assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==12&&rendered==0&&s_reader_text_frame);
   assert(!s_reader_cleanup&&!s_reader_turn_pending);
  }
  reset();s_reader_turn_pending=false;present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12&&rendered==1);
@@ -115,7 +117,7 @@ int main(void){
  s_reader_clock_painted_minute=321;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&s_reader_clock_minute==321&&!s_reader_clock_pending);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- puts("PASS: official GL16 text/body and independent footer, periodic text cleanup, manual full, chrome redraw, ripple, image, minute clock and cancellation routes; failed frames stay uncommitted");
+ puts("PASS: official GL16 text/body and independent footer, periodic whole-screen GC16 cleanup, manual full, chrome redraw, ripple, image, minute clock and cancellation routes; failed frames stay uncommitted");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-',dir='/private/tmp') as folder:

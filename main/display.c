@@ -36,7 +36,6 @@
 #include <string.h>
 #include "esp_heap_caps.h"
 #include "display_main_waveform.h"
-#include "display_reader_waveform.h"
 #include "ui/ui_nav_layout.h"
 
 static const char* TAG = "read_pico";
@@ -807,18 +806,6 @@ enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl) {
     return result;
 }
 
-enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform) {
-    LATENCY_DISPLAY_BEGIN();
-    bool held=pico_online_display_begin();
-    s_full_refresh_requested=false;
-    display_main_transition_cancel();
-    // 物理擦白与历史帧同步，不能只把软件历史置白；目标帧保持不变。
-    // Erase physically before synchronizing white history; never merely fake the baseline or alter the target.
-    use_scan_for(&E0470_WAVEFORM,MODE_GC16);epd_poweron();epd_clear();
-    enum EpdDrawError result=update_display_from_white_with_unlocked(hl,text_waveform,MODE_GL16);
-    pico_online_display_end(held);
-    LATENCY_DISPLAY_END();return result;
-}
 enum EpdDrawError update_display_image_gray(EpdiyHighlevelState* hl) {
     LATENCY_DISPLAY_BEGIN();
     bool held = pico_online_display_begin();

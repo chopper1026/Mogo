@@ -11,7 +11,7 @@
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
- * 普通翻页只刷新正文与页脚；手动或周期清残影整屏全刷。
+ * 普通翻页只刷新正文与页脚；手动与周期清残影共用同一条整屏 GC16 全刷。
  * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换，中间双击已取消。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
@@ -30,8 +30,10 @@
  * User revision: read the page's finished caches before its first frame; cold generation is bounded, but cover artwork is revealed together.
  * 用户修订：字号和间距重排只保存最终进度，字号使用现有闲置灰阶整理。
  * 用户修订：阅读设置滑杆可拖动并在松手后重排；字体选择可纵向翻页；统计入口显示真实明细与近30天数据。
- * 用户修订：前后均为纯文字的普通翻页采用柔和 GL16 差分，仅白底灰边提前少量回浅，不改字形或灰度目标；插图、混排、周期全刷及水波纹保留原规则。
- * User revision: soften ordinary pure-text GL16 turns by advancing a few white-to-gray settling pulses; preserve glyph targets, images, mixed pages, cleanup and ripple.
+ * 用户修订：前后均为纯文字的普通翻页采用柔和 GL16 差分，仅白底灰边提前少量回浅，不改字形或灰度目标；插图、混排及水波纹保留原规则。
+ * User revision: soften ordinary pure-text GL16 turns by advancing a few white-to-gray settling pulses; preserve glyph targets, images, mixed pages and ripple.
+ * 用户 2026-10-16 修订：周期清残影改走整屏 GC16，原从白重绘的黑闪次数过多。
+ * User revision 2026-10-16: periodic cleanup now uses whole-screen GC16; the from-white redraw flashed too many times.
  * 用户修订：目录由独立模块整页绘制与命中；目录标题清理换行并限制为单行，翻页不再沿用书架的局部刷新。
  * 用户修订：书架封面抽出与取消仅驱动变化像素，保持灰阶，不在点按时强制清屏。
  * 用户修订：列表封面上弹8px，松手先回位再开书；只重画两位置的并集，复用缓存，不触碰文字/边框/分隔线。快刷用跟随DU，其他模式保留灰阶差分。
@@ -64,7 +66,7 @@
  * User revision: input refreshes changed regions without repainting headers, covers or body; release lookup caches on exit.
  * Shake is off by default: left/right impulses turn back/forward, suppressing touch and rebound; exit restores the sensor and sleeps it. Render only paints.
  * Prefetch overlaps synchronous output and stops between rows; no font/chapter resources survive presentation.
- * Ordinary turns refresh only body and footer; manual and periodic ghost cleanup refresh the entire screen.
+ * Ordinary turns refresh only body and footer; manual and periodic ghost cleanup share one whole-screen GC16 output.
  * User revision: single body taps use halves or upper 1/3/lower 2/3 independently of key mappings; full screen is toggled from the toolbar button or a full-screen key action, and center double taps are gone.
  * Short key actions are configurable with two presets; middle holds are configurable and default to home. The reader has no bottom-right menu icon.
  * User-authorized management shows full details before separate clear/delete confirmations; retain failed saves for retry without pruning other books.
@@ -83,7 +85,7 @@
  * User revision: the shelf retains its title layout, reads a complete cached page before painting, and reveals cold artwork only after the page is prepared.
  * User revision: size and spacing reflow saves final progress only; size uses the existing idle grayscale settle.
  * User revision: reader sliders drag and reflow on release; font selection pages vertically; statistics entries show real details and recent-30-day data.
- * User revision: pure-text turns use softened gray-edge differential GL16; images/mixed pages, periodic cleanup and water turns retain their policies.
+ * User revision: pure-text turns use softened gray-edge differential GL16; images, mixed pages and water turns retain their policies, while periodic cleanup uses whole-screen GC16.
  * User revision: a standalone module owns full-page TOC rendering and hit testing; normalized single-line titles cannot leak into another row.
  * User revision: cover lift and cancellation drive changed pixels in grayscale, without forced cleanup during a tap.
  * 用户修订：快刷仅常驻黑白缩略图；灰阶解码缓冲转好即释放，灰阶模式按需重建，收藏白边单独记录。
@@ -3192,15 +3194,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         redraw != APP_REDRAW_FULL && !s_reader_cleanup
         ? update_display_mode_diff(ctx->hl, MODE_GL16)
         : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
-    else if(s_reader_cleanup&&s_reader_turn_pending&&s_view==READING&&
-        s_reader_panel==READER_PANEL_NONE&&!s_toolbar&&!s_clear_confirm) {
-        // 纯文字自动清屏用原厂未调序的 GL16 文字表从白重绘：调序表只为普通翻页差分的
-        // 柔和灰边整定，从白全页成像会让抗锯齿浅灰边缘偏深（字变粗），实机已验证。
-        // Pure-text cleanup redraws from white with the unmodified factory GL16 text table:
-        // the reordered ladder is tuned for differential turns only, and full-page from-white
-        // imaging drives antialiased gray edges too dark (bolder glyphs, confirmed on device).
-        err=update_display_reader_cleanup(ctx->hl,&E0470_TEXTTURN_WAVEFORM);
-    }
+    // 用户 2026-10-16 修订：周期清残影与手动全刷共用同一条整屏 GC16，不再先盲擦整屏再从白底
+    // 重绘文字；原路径每轮三轮黑白盲驱动，黑闪次数过多。清屏页此后由 GC16 成像。
+    // User revision 2026-10-16: periodic cleanup now shares the whole-screen GC16 used by the
+    // manual full refresh, instead of erasing blindly and redrawing from white, whose three
+    // black/white cycles flashed too many times. The cleanup page is now imaged by GC16.
     else if (redraw == APP_REDRAW_FULL || s_reader_cleanup) err = update_display_full(ctx->hl);
     else if (redraw == APP_REDRAW_AREA && s_view == SHELF && s_shelf_feedback_pending) {
         // 抽出与复位只驱动发生变化的像素，避免整张封面被反复压黑。

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 阅读「自动全刷」（每 5/10/15/30 页）改用与顶部下拉快捷全刷、阅读页手动全刷完全相同的整屏 GC16，不再先整屏黑白盲擦再从白底重绘：清理时黑闪由多轮减为一次，停顿也更短。清屏页此后由 GC16 成像，不再复用普通翻页的文字梯子；插图、混排与工具栏打开时的清理行为不变。
+  The reader's automatic cleanup (every 5/10/15/30 pages) now uses the same whole-screen GC16 as the quick-panel and manual full refresh instead of a blind erase plus from-white redraw: one flash instead of several, with a shorter pause. The cleanup page is now imaged by GC16 rather than the ordinary turn's text ladder; image, mixed and toolbar-open cases are unchanged.
 - 自动对时统一为每 6 小时一次：已联网（传书页/升级）时直接复用当前连接，不再额外每小时校准；设置页「上次对时」恢复随每次成功对时更新。
   Auto-sync now runs on a single six-hour cadence, reusing an existing connection instead of calibrating hourly, and the settings page's last-sync time updates on every success again.
 - 全屏改由阅读工具栏的「全屏」按钮或按键动作切换，正文中间双击不再生效；「全屏沉浸」开关更名为「状态栏」，决定全屏时是否占用顶部状态栏。翻页只收起工具栏与滑块，不再把窗口化阅读拉回全屏；开书沿用上次记住的全屏偏好（默认全屏）。中部单击分区不变。

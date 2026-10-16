@@ -71,7 +71,7 @@ static EpdRect pushed_area;
 static int trace_route[256], trace_mode[256], trace_wave[256];
 static EpdRect trace_area[256];
 static unsigned trace_count;
-enum {DIFF=1,AREA,FULL,WHOLE,FAST,WATER,READER,LOCAL_FULL,READER_CLEANUP};
+enum {DIFF=1,AREA,FULL,WHOLE,FAST,WATER,READER,LOCAL_FULL};
 static int test_style;static bool test_fast;
 static int app_settings_shelf_style(void){return test_style;}
 static bool app_settings_main_fast_refresh(void){return test_fast;}
@@ -160,7 +160,6 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const int *wave,
 static enum EpdDrawError update_display_area_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(AREA,mode,area);}
 static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,enum EpdDrawMode mode,EpdRect area){(void)hl;trace_wave[trace_count]=*wave;return record(LOCAL_FULL,mode,area);}
 static enum EpdDrawError update_display_with(void *hl,const int *wave,enum EpdDrawMode mode){(void)hl;(void)wave;return record(WHOLE,mode,(EpdRect){0});}
-static enum EpdDrawError update_display_reader_cleanup(void *hl,const int *wave){(void)hl;trace_wave[trace_count]=*wave;return record(READER_CLEANUP,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;return record(FULL,MODE_GC16,(EpdRect){0});}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return record(FAST,MODE_GL16,(EpdRect){0});}
 static enum EpdDrawError update_display_mode_diff(void *hl,enum EpdDrawMode mode){(void)hl;return record(READER,mode,(EpdRect){0});}
@@ -215,8 +214,8 @@ int main(void){
  s_view=s_presented_view=SHELF;paint_control(&ctx,row_rect(0));
  assert(present(&ctx,APP_REDRAW_FULL)&&route==FULL&&pushed_mode==MODE_GC16&&!s_shelf_feedback_pending);
  puts("PASS: 80 cover lift/cancel feedbacks use one grayscale differential, preserve the union and never force cleanup; buttons, view transitions and manual refresh retain their paths");
- // 阅读翻页只有一次正文灰阶推屏；页脚、清残影、图片、水波纹与设置面板保持原路由。
- // One grayscale body commit per text turn; footer, cleanup, images, water and settings keep their routes.
+ // 阅读翻页只有一次正文灰阶推屏；页脚、图片、水波纹与设置面板保持原路由；清残影改走整屏 GC16。
+ // One grayscale body commit per text turn; footer, images, water and settings keep their routes, while cleanup uses whole-screen GC16.
  s_view=s_presented_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;
  s_area=reader_area();s_mode=MODE_GL16;s_reader_turn_pending=s_reader_footer_pending=true;
  trace_count=0;assert(present(&ctx,APP_REDRAW_AREA));
@@ -227,7 +226,7 @@ int main(void){
  for(int full=0;full<2;++full){
    s_reader_fullscreen=full;s_reader_turn_pending=true;s_reader_cleanup=true;
    s_reader_footer_pending=!full;trace_count=0;
-   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==READER_CLEANUP&&pushed_mode==MODE_GL16&&trace_wave[0]==E0470_TEXTTURN_WAVEFORM);
+   assert(present(&ctx,APP_REDRAW_AREA)&&trace_count==1&&route==FULL&&pushed_mode==MODE_GC16);
    s_reader_turn_pending=true;trace_count=0;
    assert(present(&ctx,APP_REDRAW_FULL)&&trace_count==1&&route==FULL);
  }
@@ -338,7 +337,7 @@ int main(void){
    s_page=0;trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));
    test_full_pages=policy?1:0;test_effect=policy?0:1;s_turns=0;
    app_redraw_t redraw=turn_page(&ctx,1);trace_count=0;present(&ctx,redraw);
-   assert(trace_route[0]==(policy?READER_CLEANUP:WATER));
+   assert(trace_route[0]==(policy?FULL:WATER));
  }
  test_full_pages=0;test_effect=0;s_page=0;test_types[0][0]=1;test_image.gray=NULL;
  trace_count=0;present(&ctx,paint_reading(&ctx,MODE_GL16));assert(!s_reader_text_frame);
