@@ -33,6 +33,7 @@
 #include "pmu_selftest.h"
 #include "soc/rtc_cntl_reg.h"
 #include "read_pico_board.h"
+#include "read_pico_crashlog.h"
 #include "read_pico_init.h"
 #include "read_pico_pmu.h"
 #include "read_pico_pmu_protocol.h"
@@ -47,13 +48,17 @@
 static const char* TAG = "read_pico";
 extern const app_desc_t app_boot_recovery;
 
-// 主机上电会丢失系统时间；PMU 在主机断电后继续走时。先取实时值再恢复，
-// 不使用启动时缓存的快照，以免将已经经过的开机耗时丢掉。
+// 软复位保留有效的 S3 RTC；断电才用 PMU 的实时秒和毫秒恢复。
+// Retain a valid S3 RTC across soft reset; restore fresh PMU seconds and milliseconds after power loss.
 static void restore_time_from_pmu(void) {
+    struct timeval current;
+    if (gettimeofday(&current, NULL) == 0 && current.tv_sec >= 1704067200 &&
+        current.tv_sec <= 4102444799U) return;
     if (read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0) != ESP_OK) return;
     const pmu_snapshot_t *pmu = read_pico_pmu_get();
-    if (!pmu || !pmu->time_synced || pmu->unix_sec < 1704067200 || pmu->unix_sec > 4102444799U) return;
-    struct timeval tv = {.tv_sec = (time_t)pmu->unix_sec, .tv_usec = 0};
+    if (!pmu || !pmu->time_ok || !pmu->time_synced || pmu->unix_millis >= 1000 ||
+        pmu->unix_sec < 1704067200 || pmu->unix_sec > 4102444799U) return;
+    struct timeval tv = {.tv_sec = (time_t)pmu->unix_sec, .tv_usec = pmu->unix_millis * 1000};
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from PMU");
 }
 
@@ -107,8 +112,10 @@ void app_main(void) {
 
     read_pico_handle_t hw;
     if (read_pico_init(&hw) != ESP_OK) return;
+    rp_boot_mark("hw");
     if (hw.pmu_ready) restore_time_from_pmu();
     const bool vcom_ok = resolve_vcom_at_boot();
+    rp_boot_mark("vcom");
     pmu_selftest_bind(hw.sensor);
     app_sleep_bind(hw.touch, hw.sensor);
 
@@ -123,8 +130,10 @@ void app_main(void) {
     epd_hl_set_all_white(&hl);
     ui_draw_full_image(framebuffer, loading_4bpp_bin_start);
     update_display_from_white(&hl);
+    rp_boot_mark("splash");
 
     app_font_activate_system();
+    rp_boot_mark("font");
 
     if (!hw.touch_ready) {
         ESP_LOGE(TAG, "No touch controller, UI cannot run");
@@ -140,6 +149,7 @@ void app_main(void) {
     pico_ota_confirm_running();
 
     app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+    rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
     pico_resume_t resume;
     if (pico_boot_take_resume(&resume)) {
@@ -163,6 +173,7 @@ void app_main(void) {
     }
     char interrupted[PICO_BOOT_PATH_MAX];
     if (pico_boot_interrupted_book(interrupted, sizeof(interrupted))) first = &app_boot_recovery;
+    rp_boot_mark("resume");
     app_loop_run(&(app_loop_config_t){
         .hl = &hl,
         .fb = framebuffer,

@@ -25,6 +25,8 @@ on:
       - flash/vendor/**
       - flash/licenses/**
       - THIRD_PARTY_NOTICES.md
+      - LICENSE
+      - licenses/**
       - tools/release_assets.py
       - flash/release-assets.json
       - tools/stage_public_flash.py

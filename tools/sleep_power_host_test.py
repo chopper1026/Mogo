@@ -52,6 +52,9 @@ static uint8_t config[2], output[2];
 static int step, fault, clears;
 static int pins[49], pin_direction[49], pin_pull[49];
 static bool buzzer, acc_on, transfer_ok = true, ota;
+static bool avatar_ok=true;
+static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
+static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return avatar_ok;}
 static int tp_mode, touch_wakes, acc_ups, acc_downs, cpu_requests;
 static int off_calls, deep_calls, pauses, resumes, syncs, prepared, radio_stops;
 static int error_result, waits;
@@ -142,6 +145,7 @@ int main(void) {
     }
     reset(); transfer_ok = false; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !prepared && !step);
     reset(); ota = true; assert(app_enter_host_sleep(APP_SLEEP_OFF) == ESP_ERR_INVALID_STATE && !pauses && !prepared);
+    reset(); avatar_ok=false;assert(app_enter_host_sleep(APP_SLEEP_OFF)==ESP_ERR_INVALID_STATE&&!pauses&&!prepared);avatar_ok=true;
     reset(); assert(app_enter_host_sleep(APP_SLEEP_LIGHT) == ESP_ERR_INVALID_ARG && !pauses && !prepared);
     puts("PASS: exact BSP 22 sleep pull-downs, CW_INT key wake retained, host-off masks, MODE and Port1 parking, touch/accelerometer restore, absent IOE and I2C faults; rails-before-park; bounded PMU fail/stuck EN and upload/OTA guards");
 }

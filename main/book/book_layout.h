@@ -5,8 +5,8 @@
  * 中文：借用章节 UTF-8 文本，生成分页并绘制正文。
  * English: Paginate borrowed chapter UTF-8 text and draw its body.
  *
- * 冻结：不释放原文、不刷新屏幕；调用方持有字体绘制互斥锁。
- * Frozen: Never free source text or present the display; caller holds the font draw lock.
+ * 冻结：不释放原文、不刷新屏幕；调用方串行化字体访问，推屏期间的预绘必须在返回UI前交还。
+ * Frozen: Never free source text or present the display; the caller serializes font access and hands any output-overlapped prefetch back before UI work resumes.
  */
 #pragma once
 #include <stdbool.h>
@@ -98,3 +98,15 @@ void book_layout_draw_page(uint8_t* fb, size_t page, EpdRect rect, int px);
 size_t book_layout_page_for_offset(size_t off);
 /// 返回页首原文字节偏移；越界页返回文本长度。/ Return source byte offset at page start; invalid pages return text length.
 size_t book_layout_page_start_offset(size_t page);
+
+/// 空闲预绘游标；不持有正文或字体指针，布局代次变化立即失效。
+/// Idle drawing cursor: borrows no text/font pointers and expires on layout generation changes.
+typedef struct {
+    uint32_t generation, image_at;
+    size_t page, offset;
+    int64_t used;
+    bool started, complete, failed;
+} book_layout_draw_cursor_t;
+/// 每次只画一行或一列，不推屏；返回-1失败、0待续、1完成。只在UI空闲线程调用。
+/// Draw at most one row/column without presenting; -1 failed,0 pending,1 complete. UI idle thread only.
+int book_layout_draw_slice(uint8_t *fb,size_t page,EpdRect rect,int px,book_layout_draw_cursor_t *cursor);

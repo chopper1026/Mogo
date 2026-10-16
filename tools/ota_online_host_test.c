@@ -65,6 +65,11 @@ esp_err_t esp_ota_set_boot_partition(const esp_partition_t *p){assert_flash_lock
 void read_pico_transfer_get_status(read_pico_transfer_status_t*s){*s=(read_pico_transfer_status_t){.mode=1,.network_ready=offline_polls==0};}
 esp_err_t read_pico_transfer_get_saved_wifi(char*s,bool*b){strcpy(s,"test");*b=true;return ESP_OK;}
 void read_pico_transfer_stop(void){}
+// 联网升级与自动对时互斥：升级路径只取消自动对时并登记成功，本用例不验证对时本身。
+// Online updates and auto time sync are mutually exclusive; the update path only cancels the
+// sync and records success, which this case does not exercise.
+void app_time_service_cancel(void){}
+void app_time_service_note_success(uint32_t utc_seconds){(void)utc_seconds;}
 esp_err_t read_pico_transfer_start(const read_pico_transfer_cfg_t*c){(void)c;return ESP_OK;}
 void read_pico_transfer_service_poll(void){if(offline_polls){--offline_polls;if(cancel_reconnect)atomic_store(&s_cancel,true);}}
 esp_err_t esp_wifi_get_ps(wifi_ps_type_t*p){*p=wifi_ps;return ESP_OK;}

@@ -63,7 +63,9 @@ static unsigned erased_completed,paint_calls;
 #define EPD_DRAW_ALIGN_RIGHT 1
 #define EPD_DRAW_ALIGN_CENTER 2
 static int ui_text_last_percent;
-static void epd_fill_rect(EpdRect r,int color,uint8_t *fb){
+// rc93 起设置页经 ui_fill_rect_fast 落色；替身保留原有的像素簿记。
+// Since rc93 the settings page inks through ui_fill_rect_fast; the stand-in keeps the pixel bookkeeping.
+static void ui_fill_rect_fast(EpdRect r,int color,uint8_t *fb){
  (void)fb;assert(r.x>=0&&r.y>=0&&r.x+r.width<=684&&r.y+r.height<=1216);++paint_calls;
  for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x){
   if(append_only&&color==UI_GRAY_WHITE&&y>=519&&y<527&&x>=61&&x<61+s_upgrade_bar_width)++erased_completed;
@@ -112,20 +114,11 @@ esp_err_t pico_online_check(void){assert(feedback_presented&&cache_releases==2);
 esp_err_t pico_online_download(void){assert(feedback_presented&&cache_releases==2);++starts;return start_error;}
 void pico_online_get_status(pico_update_status_t *out){*out=backend_status;}
 #include "ui/ui_nav_layout.h"
-#include "ui/ui_follow_scroll.h"
-#include "ui/ui_follow_cache.h"
 #include "app.h"
 static enum {SETTINGS_MAIN,SETTINGS_TEXT_EDIT,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SHELF_STYLE,
  SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR,SETTINGS_UPGRADE,SETTINGS_PIN_ENTRY} s_page;
-static bool s_input_settle,s_input_layout,s_scroll_present_pending,s_scroll_follow_present,
- s_scroll_frame_changed,s_scroll_settle_present;
+static bool s_input_settle,s_input_layout,s_scroll_present_pending;
 static EpdRect s_input_area;
-static ui_follow_scroll_t s_follow_scroll;
-static uint8_t *s_scroll_cache;
-static unsigned s_scroll_cache_step;
-static int s_main_scroll;
-#define SETTINGS_SCROLL_MAX 334
-static void settings_scroll_cache_release(void){free(s_scroll_cache);s_scroll_cache=NULL;s_scroll_cache_step=0;}
 typedef struct {int kind;} EpdWaveform;
 static const EpdWaveform E0470_WAVEFORM={0},E0470_FOLLOW_WAVEFORM={1};
 enum EpdDrawMode {MODE_DU,MODE_GL16};
@@ -143,13 +136,6 @@ static enum EpdDrawError update_display_area_diff_with(void *hl,const EpdWavefor
 static enum EpdDrawError update_display_area_full_with(void *hl,const EpdWaveform *waveform,enum EpdDrawMode mode,EpdRect area){
  ++full_pushes;return update_display_area_diff_with(hl,waveform,mode,area);
 }
-static int display_follow_area(void *hl,EpdRect area,bool changed,bool continuous){
- (void)changed;(void)continuous;return update_display_area_diff_with(hl,&E0470_FOLLOW_WAVEFORM,MODE_DU,area);
-}
-static int display_follow_settle(void *hl,EpdRect area,bool restore){
- return restore?update_display_area_diff_with(hl,&E0470_WAVEFORM,MODE_GL16,area):0;
-}
-static bool app_settings_main_fast_refresh(void){return false;}
 '''
 unit += "static EpdRect ui_pinpad_full(void){return (EpdRect){0,0,684,1216};}\n"
 for name in ("upgrade_percent", "upgrade_remember", "upgrade_status_redraw", "upgrade_progress_area", "draw_upgrade_percent", "draw_upgrade_progress",

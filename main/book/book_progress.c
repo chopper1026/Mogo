@@ -35,6 +35,9 @@ struct book_progress_watch {
     struct book_progress_watch* next;
 };
 static book_progress_watch_t* s_watches;
+static atomic_uint s_progress_revision;
+uint32_t book_progress_revision(void){return atomic_load_explicit(&s_progress_revision,memory_order_relaxed);}
+void book_progress_notify_changed(void){atomic_fetch_add_explicit(&s_progress_revision,1,memory_order_relaxed);}
 
 static bool path_valid(const char* path) {
     return path != NULL && path[0] != '\0' && strnlen(path, PATH_CAP) < PATH_CAP;
@@ -199,6 +202,7 @@ esp_err_t book_progress_save(const char* path, const book_progress_t* progress) 
     if (err == ESP_OK) err = nvs_set_blob(h, key, data, HEADER_SIZE + path_len);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    book_progress_notify_changed();
     return warn_error(err);
 }
 
@@ -214,6 +218,7 @@ esp_err_t book_progress_clear(const char* path) {
     if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    book_progress_notify_changed();
     return warn_error(err);
 }
 
@@ -246,6 +251,7 @@ esp_err_t book_progress_forget(const char* path) {
     if (err == ESP_ERR_NVS_NOT_FOUND) err = ESP_OK;
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    book_progress_notify_changed();
     return warn_error(err);
 }
 
@@ -272,5 +278,6 @@ esp_err_t book_progress_set_last_path(const char* path) {
     err = nvs_set_str(h, "last", path);
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
+    book_progress_notify_changed();
     return warn_error(err);
 }

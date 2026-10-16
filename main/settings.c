@@ -4,8 +4,8 @@
  *
  * NVS 读写。打开失败就用深睡默认值，不擦除整个分区。
  *
- * 用户修订：三键短按或中键长按至少保留一个工具栏入口，最后入口不能改走；启动及旧备份缺失时补中键工具栏，提交失败不更改运行映射。
- * User revision: at least one short key or the middle hold must open the toolbar; refuse removal of the last entry, repair missing entries at boot/restore, and change runtime mappings only after a successful commit.
+ * 用户修订：底部上滑是固定工具栏入口，短按和长按可自由设置；启动与恢复不再强制改成工具栏，提交失败仍保留原映射。
+ * User revision: bottom-edge swipes provide a permanent toolbar entry, freeing all short/hold mappings. Boot/restore no longer force a toolbar key; failed commits retain previous mappings.
  * 用户修订：三键短按映射单独持久化；备份v11追加长按映射，旧备份缺少长按映射时恢复返回首页。
  * User revision: persist short key mappings; backup v11 adds a checked hold action; older backups without a hold mapping default to home. Five reading stroke levels are sealed in backup v13.
  * 用户修订：首行缩进微调-20..20px单独持久化，备份v12追加校验块；旧备份恢复0，不更改密码凭据。
@@ -152,11 +152,6 @@ static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
 static void nvs_put_u32(const char* key, uint32_t value);
-static void reader_keys_repair(uint8_t keys[3], uint8_t hold) {
-    if (hold == APP_READER_KEY_TOOLS) return;
-    for (unsigned i = 0; i < 3; ++i) if (keys[i] == APP_READER_KEY_TOOLS) return;
-    keys[1] = APP_READER_KEY_TOOLS;
-}
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -305,7 +300,9 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_HOLD_REFRESH, &hold_refresh) == ESP_OK) s_reader_hold_refresh = hold_refresh == 1;
     for (unsigned i = 0; i < 3; ++i) {
         uint8_t value;
-        if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK && value < APP_READER_KEY_COUNT)
+        // 本地测试固件存过值 7（已撤销的「返回」动作）；钳回不操作。
+        // Local test builds stored value 7 (the withdrawn "back" action); clamp it to no-op.
+        if (nvs_get_u8(h, s_reader_key_names[i], &value) == ESP_OK && value < APP_READER_KEY_NONE)
             s_reader_keys[i] = value;
     }
     uint8_t hold_action = APP_READER_KEY_HOME;
@@ -316,7 +313,6 @@ void app_settings_init(void) {
     bool old_default_hold = migrate_reader_defaults && s_reader_hold_action == APP_READER_KEY_REFRESH &&
         s_reader_keys[0] == APP_READER_KEY_PREV && s_reader_keys[1] == APP_READER_KEY_TOOLS &&
         s_reader_keys[2] == APP_READER_KEY_NEXT;
-    reader_keys_repair(s_reader_keys, s_reader_hold_action);
     uint8_t vertical_turn = 0;
     if (nvs_get_u8(h, NVS_KEY_VERTICAL_TURN, &vertical_turn) == ESP_OK) s_reader_vertical_turn = vertical_turn == 1;
     uint8_t hide_images = 0, recent_sort = 0, ble_turner = 0, book_fonts = 1, book_vertical = 0;
@@ -720,11 +716,7 @@ app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
 }
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action) {
-    if (key >= 4 || action < 0 || action >= APP_READER_KEY_COUNT) return false;
-    if ((key == 3 ? action : s_reader_hold_action) == APP_READER_KEY_TOOLS) return true;
-    for (unsigned i = 0; i < 3; ++i)
-        if ((i == key ? action : s_reader_keys[i]) == APP_READER_KEY_TOOLS) return true;
-    return false;
+    return key < 4 && action >= 0 && action < APP_READER_KEY_COUNT;
 }
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action) {
     if (key >= 3 || !app_settings_reader_key_action_allowed(key, action)) return false;
@@ -1304,7 +1296,6 @@ esp_err_t app_settings_backup_restore(void) {
 
     backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
     if (version < 15) backup.flags[BK_SHAKE] = 0; // 旧晃动标志不改变AA。/ Old shake flags never affect AA.
-    reader_keys_repair(keys.actions, hold.action);
     // 已删除组件的备份仍可恢复，其余字段不受影响。/ Restore retired widget backups without rejecting other preferences.
     if (home.component == 3) home.component = APP_HOME_CLOCK;
     // The backup contains paths, not the corresponding font or image bytes.

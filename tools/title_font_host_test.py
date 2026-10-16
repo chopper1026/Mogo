@@ -80,6 +80,7 @@ int ui_font_title_px(int px,const char *s){(void)s;return px;}
 int ui_font_text_width_px(int px,const char *s){(void)px;(void)s;assert(0);return 0;}
 void ui_font_measure_line_px(int px,const char *s,int *above,int *below){(void)px;(void)s;(void)above;(void)below;assert(0);}
 void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;assert(0);}
+void ui_font_draw_text_px(uint8_t *fb,int x,int y,int px,const char *s,enum EpdFontFlags a,uint8_t fg,uint8_t bg,bool bw){(void)fb;(void)x;(void)y;(void)px;(void)s;(void)a;(void)fg;(void)bg;(void)bw;assert(0);}
 static uint8_t pixels[400*200];
 static bool record_coverage;
 void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=0&&x<400&&y>=0&&y<200);if(record_coverage)fb[y*400+x]=c>>4;else{assert(c==0);fb[y*400+x]=1;}++painted;}
@@ -96,10 +97,13 @@ int main(int argc,char **argv){
    assert(ui_text_title_fit(title,px,300,text)==px&&!strcmp(title,text));
    int above,below;ttf_measure_line_px(px,text,&above,&below);
    assert((unsigned)(above+below)>old_height);old_height=above+below;
-   memset(pixels,0,sizeof(pixels));painted=0;
+   // 题头沿抗锯齿路径成像，参考图必须同样记录覆盖率，而不是只比对黑白掩码。
+   // Titles image through the antialiased path, so the reference must record coverage too
+   // instead of comparing a black/white mask.
+   record_coverage=true;memset(pixels,0,sizeof(pixels));painted=0;
    ui_text_title_vc(pixels,200,80,px,title,text,EPD_DRAW_ALIGN_CENTER);assert(painted>0);
    uint8_t expected[sizeof(pixels)];memset(expected,0,sizeof(expected));
-   ttf_draw_text_px_bw(expected,200,80+(above-below)/2,px,title,EPD_DRAW_ALIGN_CENTER,0,15);
+   ttf_draw_text_px(expected,200,80+(above-below)/2,px,title,EPD_DRAW_ALIGN_CENTER,0,15);
    assert(!memcmp(pixels,expected,sizeof(pixels)));
    size_t warm=live;
    for(unsigned n=0;n<15;++n)ui_text_title_vc(pixels,200,80,px,title,text,EPD_DRAW_ALIGN_CENTER);

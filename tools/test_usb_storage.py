@@ -70,6 +70,9 @@ int tinyusb_driver_install(const tinyusb_config_t *config);
 int tinyusb_driver_uninstall(void);
 bool tud_mounted(void);
 void tud_disconnect(void);
+bool book_cover_jobs_quiesce(unsigned timeout_ms);
+void book_lock_collage_invalidate(void);
+bool ui_avatar_quiesce(unsigned timeout_ms);
 '''
 UNIT = r'''
 #include "usb_stub.h"
@@ -107,6 +110,10 @@ int tinyusb_driver_uninstall(void){assert(!borrowed&&!connected);if(usb_error)re
 int tinyusb_msc_uninstall_driver(void){assert(!borrowed&&!driver);if(msc_error)return msc_error;msc=false;return ESP_OK;}
 bool tud_mounted(void){return connected;}
 void tud_disconnect(void){assert(driver);connected=false;}
+bool book_cover_jobs_quiesce(unsigned t){assert(t==2000);return true;}
+bool ui_avatar_quiesce(unsigned t){assert(t==2000);return true;}
+static int collage_invalidations;
+void book_lock_collage_invalidate(void){++collage_invalidations;}
 static void stopped(void){assert(mounted&&!usb_storage_active()&&!usb_storage_connected());assert(!s_cleanup_pending&&!s_card&&!s_storage&&!host&&!driver&&!msc&&s_serial_phy);}
 static void retained(void){assert(!mounted&&usb_storage_active()&&!usb_storage_connected()&&s_cleanup_pending&&s_card&&host&&s_serial_phy);assert(usb_storage_start()==ESP_ERR_INVALID_STATE);}
 int main(void){
@@ -128,6 +135,7 @@ int main(void){
     for(stage=1;stage<=6;++stage){assert(usb_storage_start()==ESP_FAIL);stopped();}stage=0;
     stage=6;delete_error=ESP_FAIL;before=remounts;assert(usb_storage_start()==ESP_FAIL);retained();assert(remounts==before);
     stage=delete_error=0;assert(usb_storage_stop()==ESP_OK);stopped();
+    assert(collage_invalidations>0);
     release_serial_phy();assert(!s_serial_phy);
     puts("USB: console recovery, delayed writes, 3 stop failures, 6 start failures, exclusive remount and retry passed");
 }
@@ -137,7 +145,8 @@ with tempfile.TemporaryDirectory() as d:
     (p/'usb_stub.h').write_text(STUB)
     for name in ('esp_err.h','driver/sdmmc_host.h','esp_log.h','esp_private/usb_phy.h',
                  'freertos/FreeRTOS.h','freertos/task.h','read_pico_sd.h','sdmmc_cmd.h',
-                 'tinyusb.h','tinyusb_default_config.h','tinyusb_msc.h','ttf_font.h'):
+                 'tinyusb.h','tinyusb_default_config.h','tinyusb_msc.h','ttf_font.h',
+                 'ui_avatar.h','book_cover_jobs.h','book_lock_collage.h'):
         header=p/name;header.parent.mkdir(parents=True,exist_ok=True);header.write_text('#include "usb_stub.h"\n')
     (p/'test.c').write_text(UNIT)
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined',

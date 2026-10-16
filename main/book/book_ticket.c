@@ -167,7 +167,7 @@ static uint8_t *cover_load(const char *path, const char *title, const char *auth
 }
 static void cover_background_draw(uint8_t *fb, const uint8_t *gray) {
     if (!gray) {
-        epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, 0xb0, fb);
+        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT}, 0xb0, fb);
         return;
     }
     int crop_x = 0, crop_y = 0, crop_w = BOOK_COVER_W, crop_h = BOOK_COVER_H;
@@ -200,24 +200,24 @@ static void ticket_paper_draw(uint8_t *fb) {
     for (int x = left; x < right; ++x) {
         int cut = notch_depth(x);
         int y0 = top + cut, y1 = bottom - cut;
-        epd_fill_rect((EpdRect){x, y0, 1, y1 - y0}, UI_GRAY_WHITE, fb);
+        ui_fill_rect_fast((EpdRect){x, y0, 1, y1 - y0}, UI_GRAY_WHITE, fb);
         epd_draw_pixel(x, y0, UI_GRAY_BLACK, fb);
         epd_draw_pixel(x, y1 - 1, UI_GRAY_BLACK, fb);
     }
-    epd_fill_rect((EpdRect){left, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
-    epd_fill_rect((EpdRect){right - 1, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){left, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){right - 1, top + 20, 1, bottom - top - 40}, UI_GRAY_BLACK, fb);
 }
 static void ticket_shadow_draw(uint8_t *fb) {
     const int left = 48, right = 636, top = 58, bottom = 1158;
     for (int x = left; x < right; ++x) {
         int cut = notch_depth(x);
         int y0 = top + cut + 8, y1 = bottom - cut + 8;
-        epd_fill_rect((EpdRect){x + 5, y0, 1, y1 - y0}, 0x80, fb);
+        ui_fill_rect_fast((EpdRect){x + 5, y0, 1, y1 - y0}, 0x80, fb);
     }
 }
 static void cover_draw(uint8_t *fb, const uint8_t *gray, const char *title) {
     EpdRect box = {216, 378, 252, 344};
-    epd_fill_rect(box, UI_GRAY_LIGHT, fb);
+    ui_fill_rect_fast(box, UI_GRAY_LIGHT, fb);
     if (gray) {
         for (int y = 0; y < box.height; ++y)
             for (int x = 0; x < box.width; ++x) {
@@ -298,9 +298,9 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     else snprintf(line, sizeof(line), "已读 —  ·  章节 —");
     ticket_stat(fb, 802, 54, 34, line);
     EpdRect track = {82, 868, 520, 10};
-    epd_fill_rect(track, UI_GRAY_LIGHT, fb);
+    ui_fill_rect_fast(track, UI_GRAY_LIGHT, fb);
     track.width = progress_valid ? track.width * progress.pct / 100 : 0;
-    if (track.width) epd_fill_rect(track, UI_GRAY_BLACK, fb);
+    if (track.width) ui_fill_rect_fast(track, UI_GRAY_BLACK, fb);
     if (day && stats.day == day) snprintf(line, sizeof(line), "今日阅读 %llu 分钟  ·  翻页 %u 次",
         (unsigned long long)(stats.today_seconds / 60), (unsigned)stats.today_turns);
     else snprintf(line, sizeof(line), "今日阅读 —  ·  日期未同步");

@@ -324,9 +324,14 @@ int main(void){
 # Active tick dispatch must consume reports before a state-only redraw can return.
 assert 'ble_receive_feedback()' in function(SETTINGS, 'on_tick')
 assert 'while (ble_pt_pop_raw(&stale))' in function(SETTINGS, 'on_gesture')
+# 对时入口经 sync_time_run 落到持有 BLE 租约的 sync_time_impl；扫描与传输入口直接取租约。
+# The sync-time entry delegates through sync_time_run to the leased sync_time_impl; scan and
+# transfer start hold the lease directly.
 transfer = (ROOT / 'components/read_pico_transfer/read_pico_transfer.c').read_text()
-for name in ('read_pico_transfer_start', 'read_pico_transfer_scan_wifi', 'read_pico_transfer_sync_time'):
+for name in ('read_pico_transfer_start', 'read_pico_transfer_scan_wifi', 'sync_time_impl'):
     assert 'ble_pt_network_acquire()' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', name)
+assert 'sync_time_impl' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'sync_time_run')
+assert 'sync_time_run' in function(ROOT / 'components/read_pico_transfer/read_pico_transfer.c', 'read_pico_transfer_sync_time')
 assert transfer.count('ble_pt_network_acquire()') == 3
 with tempfile.TemporaryDirectory(prefix='pico-ble-test-') as directory:
     work = Path(directory)

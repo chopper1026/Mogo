@@ -3,5 +3,3 @@
 #include "common.h"
 
 void display_request_full_refresh(void);
-
-bool display_follow_busy(void);

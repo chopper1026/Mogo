@@ -45,11 +45,11 @@ idf_component_register(
         "ota_update.c"
         "ota_online.c"
         "ota_release.c"
-        "time_sync.c"
         "display.c"
         "display_main_waveform.c"
         "display_reader_waveform.c"
         "sleep.c"
+        "time_service.c"
         "lock_pin.c"
         "lock_pin_flow.c"
         "lock_screen.c"
@@ -78,6 +78,7 @@ idf_component_register(
         "ui/ui_home_clock.c"
         "ui/ui_image_dither.c"
         "ui/ui_wallpaper.c"
+        "ui/ui_avatar.c"
         "ui/ui_reader_background.c"
         "apps/app_book.c"
         "apps/book_toc.c"
@@ -100,6 +101,7 @@ idf_component_register(
         "book/book_txt.c"
         "book/book_epub.c"
         "book/book_cover.c"
+        "book/book_cover_jobs.c"
         "book/book_image_header.c"
         "book/book_cover_auto.c"
         "book/zip_reader.c"
@@ -129,3 +131,8 @@ idf_component_register(
 # that is the only place it survives. The option hangs off main, whose INTERFACE carries it into
 # the final link; a global property set after project() is too late for the linker to see it.
 target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
+
+# 本地 USB 测时入口，普通构建不包含。/ Local USB timing probe, omitted from ordinary product builds.
+if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_LOCAL_LATENCY=1)
+endif()

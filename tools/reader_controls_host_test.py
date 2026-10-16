@@ -24,7 +24,6 @@ enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTI
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider=3,s_pressed_control=2;
 static char *s_text="text";
 static bool s_clear_confirm,s_scan_pending;
-static struct {bool pending;} s_reader_tap;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static unsigned invalidations;
 static void invalidate_prep(void){++invalidations;}
@@ -32,6 +31,8 @@ static bool locked,aa=true,raster_aa=true,save_fail;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
 static bool app_settings_book_antialias(void){return aa;}
+static bool vertical_book;
+static bool app_settings_book_vertical(void){return vertical_book;}
 static bool app_settings_set_book_antialias(bool on){assert(locked);if(save_fail)return false;aa=on;return true;}
 static void ttf_set_antialias(bool on){assert(locked);raster_aa=on;}
 static bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<r.y+r.height;}
@@ -51,20 +52,20 @@ unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRA
 unit+=r'''
 static void reset(app_ctx_t *ctx){
  s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
- s_reader_tap.pending=true;s_reader_slider=3;s_pressed_control=2;invalidations=0;
+ s_reader_slider=3;s_pressed_control=2;invalidations=0;
  *ctx=(app_ctx_t){.now_ms=2200};
 }
 int main(void){
  app_ctx_t ctx;ui_gesture_event_t e={.type=UI_GESTURE_SWIPE_U,.x0=342,.y0=1160,.x=342,.y=980};
  for(int vertical=0;vertical<2;++vertical)for(int immersive=0;immersive<2;++immersive){
   (void)immersive;reset(&ctx);assert(reader_tools_swipe(&ctx,&e));
-  assert(s_reader_panel==READER_PANEL_TOOLS&&!s_reader_tap.pending&&s_reader_slider==-1&&s_pressed_control==-1);
+  assert(s_reader_panel==READER_PANEL_TOOLS&&s_reader_slider==-1&&s_pressed_control==-1);
   assert(ctx.user_activity&&s_stats_activity_ms==2200&&invalidations==1);
   assert(!reader_tools_swipe(&ctx,&e)&&invalidations==1); // Already open stays open.
   assert(reader_swipe_direction(UI_GESTURE_SWIPE_U,vertical)==(vertical?1:0));
   assert(reader_swipe_direction(UI_GESTURE_SWIPE_L,vertical)==1);
  }
- for(unsigned y=1000;y<1220;++y){reset(&ctx);e.y0=y;bool allowed=y>=1096&&y<1216;assert(reader_tools_swipe(&ctx,&e)==allowed);if(!allowed)assert(s_reader_tap.pending&&!invalidations);}
+ for(unsigned y=1000;y<1220;++y){reset(&ctx);e.y0=y;bool allowed=y>=1096&&y<1216;assert(reader_tools_swipe(&ctx,&e)==allowed);if(!allowed)assert(s_reader_panel==READER_PANEL_NONE&&!invalidations);}
  e.y0=1160;
  for(unsigned x=0;x<=684;++x){reset(&ctx);e.x0=x;assert(reader_tools_swipe(&ctx,&e)==(x<684));}e.x0=342;
  for(int type=UI_GESTURE_SWIPE_D;type<=UI_GESTURE_MOVE;++type){reset(&ctx);e.type=type;assert(!reader_tools_swipe(&ctx,&e));}e.type=UI_GESTURE_SWIPE_U;

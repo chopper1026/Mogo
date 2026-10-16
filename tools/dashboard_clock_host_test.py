@@ -65,6 +65,8 @@ static int64_t ui_nav_clock_minute(void){return minute;}
 static bool date_now(struct tm *out){*out=date;return minute>=0;}
 static void refresh_days(void){s_date=date;++record_reads;}
 static void epd_fill_rect(EpdRect area,int gray,uint8_t *fb){(void)fb;assert(gray==255&&area.x>=0&&area.y>=0&&area.x+area.width<=684&&area.y+area.height<=1216);}
+static void ui_fill_rect_fast(EpdRect area,int gray,uint8_t *fb){epd_fill_rect(area,gray,fb);}
+static void clock_base_prepare(void){}
 static void ui_nav_clock_draw(uint8_t *fb){(void)fb;++clock_paints;}
 static void ui_home_clock_style_draw_region(uint8_t *fb,EpdRect rect,const struct tm *d,bool binary,ui_home_clock_style_t style,EpdRect crop){(void)fb;(void)d;(void)style;assert(binary==fast);assert(rect.width==320||rect.width==420||rect.width==460);assert(crop.width<=rect.width&&crop.height<=rect.height);++clock_faces;}
 static EpdRect ui_home_clock_phase_area(EpdRect rect,unsigned a,unsigned b){(void)a;(void)b;return(EpdRect){rect.x+80,rect.y+40,42,48};}

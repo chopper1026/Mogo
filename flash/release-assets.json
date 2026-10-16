@@ -1,36 +1,36 @@
 {
   "schema": 1,
-  "tag": "v0.3.3-rc92",
+  "tag": "v0.3.3-rc93",
   "files": {
     "firmware.bin": {
-      "asset": "kiikoread-0.3.3-rc92.bin",
-      "size": 4132368,
-      "sha256": "d67d985eb15deeb20af16277455016b130cc8fa07868be419ca5c57fae1b709c"
+      "asset": "kiikoread-0.3.3-rc93.bin",
+      "size": 4143424,
+      "sha256": "4d3ad88bc6ac515d565848f8f2029cbbca43c18ad1ca869be8bdefc011ae816b"
     },
     "bootloader.bin": {
-      "asset": "bootloader-0.3.3-rc92.bin",
+      "asset": "bootloader-0.3.3-rc93.bin",
       "size": 21232,
-      "sha256": "a7e40c640b0697b6af62210571b638ce7cd4e6ce3a435919591c1c75644bc0e7"
+      "sha256": "c8973d79ecb54c9a82fd7bfbec4cf0bd5b24b661be40f21b882aed84893372eb"
     },
     "partitions.bin": {
-      "asset": "partitions-0.3.3-rc92.bin",
+      "asset": "partitions-0.3.3-rc93.bin",
       "size": 3072,
       "sha256": "edba9d92e5fc51c706c12f4b4a5d5d23728ba8fb0fbc00be654f1eccef404bda"
     },
     "ota_data_initial.bin": {
-      "asset": "ota-data-0.3.3-rc92.bin",
+      "asset": "ota-data-0.3.3-rc93.bin",
       "size": 8192,
       "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
     },
     "Pico-update.bin": {
-      "asset": "kiikoread-0.3.3-rc92.bin",
-      "size": 4132368,
-      "sha256": "d67d985eb15deeb20af16277455016b130cc8fa07868be419ca5c57fae1b709c"
+      "asset": "kiikoread-0.3.3-rc93.bin",
+      "size": 4143424,
+      "sha256": "4d3ad88bc6ac515d565848f8f2029cbbca43c18ad1ca869be8bdefc011ae816b"
     },
-    "Pico-update-0.3.3-rc92.bin": {
-      "asset": "kiikoread-0.3.3-rc92.bin",
-      "size": 4132368,
-      "sha256": "d67d985eb15deeb20af16277455016b130cc8fa07868be419ca5c57fae1b709c"
+    "Pico-update-0.3.3-rc93.bin": {
+      "asset": "kiikoread-0.3.3-rc93.bin",
+      "size": 4143424,
+      "sha256": "4d3ad88bc6ac515d565848f8f2029cbbca43c18ad1ca869be8bdefc011ae816b"
     }
   },
   "historical": [
@@ -51,6 +51,16 @@
           "asset": "kiikoread-0.3.3-rc91.bin",
           "size": 3987472,
           "sha256": "42754be8bdecbd052ee8fb48a49bd2606693814963dac202a78a88c66dbc01de"
+        }
+      }
+    },
+    {
+      "tag": "v0.3.3-rc92",
+      "files": {
+        "Pico-update-0.3.3-rc92.bin": {
+          "asset": "kiikoread-0.3.3-rc92.bin",
+          "size": 4132368,
+          "sha256": "d67d985eb15deeb20af16277455016b130cc8fa07868be419ca5c57fae1b709c"
         }
       }
     }

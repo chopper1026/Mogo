@@ -67,7 +67,8 @@ bool ui_click_feedback_release(uint8_t *fb, EpdRect *area) {
 }
 bool ui_click_feedback_cancel_at(int x, int y) {
     bool outside = s_active.kind == UI_CLICK_NAV
-        ? y < UI_NAV_TOP || x / (UI_LOCK_WIDTH / 4) != s_x / (UI_LOCK_WIDTH / 4)
+        ? x < 0 || x >= UI_LOCK_WIDTH || y < UI_NAV_TOUCH_TOP || y >= UI_LOCK_HEIGHT ||
+          x / (UI_LOCK_WIDTH / 4) != s_x / (UI_LOCK_WIDTH / 4)
         : x < s_active.area.x || x >= s_active.area.x + s_active.area.width ||
           y < s_active.area.y || y >= s_active.area.y + s_active.area.height;
     return s_pixels && (outside ||
@@ -79,7 +80,7 @@ bool ui_click_feedback_press(uint8_t *fb, int x, int y, EpdRect *area) {
     for (unsigned i = 0; i < s_count; ++i) {
         EpdRect r = s_controls[i].area;
         bool hit = s_controls[i].kind == UI_CLICK_NAV
-            ? y >= UI_NAV_TOP && x >= 0 && x < UI_LOCK_WIDTH &&
+            ? y >= UI_NAV_TOUCH_TOP && y < UI_LOCK_HEIGHT && x >= 0 && x < UI_LOCK_WIDTH &&
               x / (UI_LOCK_WIDTH / 4) == (r.x + r.width / 2) / (UI_LOCK_WIDTH / 4)
             : x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
         if (!hit) continue;

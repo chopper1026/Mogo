@@ -16,8 +16,8 @@
  * User revision: present feedback before starting online work; append black progress without erasing completed segments or counting page cleanup. Release off-screen cover caches before updating.
  * 用户确认：字号并入系统字体并预览；选择字体后询问同步阅读字体，设置按连接/显示/个性化/升级分组。
  * Approved revision: size and preview live with the UI face; ask before syncing the reading face, and group connection/display/personalization/maintenance.
- * 用户修订：滑动时仅黑白，普通/水波纹停稳只补变化灰阶，快刷不补刷；主列表复用有界一位缓存。
- * User revision: binary while moving; normal/water restore changed grays after idle, fast keeps binary. Reuse a bounded one-bit main-list cache.
+ * 用户撤回跟手滚动：三种主页模式统一恢复一次手势推进一段列表并差分刷新的原逻辑，无惯性、浅墨或停稳补刷。
+ * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,13 +46,12 @@
 #include "ttf_font.h"
 #include "app_font_context.h"
 #include "ui_gesture.h"
-#include "ui_follow_scroll.h"
-#include "ui_follow_cache.h"
 #include "ui_kit.h"
 #include "ui_text_input.h"
 #include "ui_keyboard.h"
 #include "ui_nav.h"
 #include "ui_wallpaper.h"
+#include "ui_avatar.h"
 #include "read_pico_search.h"
 #include "book_store.h"
 #include "book_cover.h"
@@ -63,10 +62,11 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "display.h"
+#include "display_main_waveform.h"
 #include "e0470_epaper_waveform.h"
 #include "pmu_selftest.h"
 #include "soc/rtc_cntl_reg.h"
-#include "time_sync.h"
+#include "time_service.h"
 
 static void fit_value(char *value, int width);
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge);
@@ -123,15 +123,7 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
 }
 static int s_style_scroll, s_main_scroll;
 static bool s_collage_prepare_pending;
-static bool s_scroll_present_pending, s_scroll_follow_present, s_scroll_frame_changed;
-static bool s_scroll_settle_present;
-static ui_follow_scroll_t s_follow_scroll;
-static uint8_t *s_scroll_cache;
-static unsigned s_scroll_cache_step;
-static void settings_scroll_cache_release(void);
-static bool settings_scroll_cache_prepare(app_ctx_t *ctx);
-static app_redraw_t settings_scroll_feed(app_ctx_t *ctx, bool *handled);
-static bool settings_scroll_page(void);
+static bool s_scroll_drag_consumed, s_scroll_present_pending;
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
 // Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
 // and a notice line.
@@ -143,6 +135,10 @@ static bool s_sync_pending;
 static bool s_font_sync_confirm;
 static char s_font_sync_path[TTF_FONT_PATH_MAX];
 static bool s_config_confirm;
+// 屏幕修复：点一下就开始。整屏盲刷要几秒，活儿交给 tick——不能在触摸回调里做。
+// Panel repair: one tap starts it. The blind full-screen drive takes seconds, so the work goes to the
+// tick rather than a touch callback.
+static bool s_panel_repair_pending;
 static bool s_boot_pending;
 static bool s_upgrade_confirm, s_upgrade_online, s_local_pending, s_upgrade_restart;
 static pico_ota_info_t s_local_update;
@@ -190,25 +186,25 @@ static EpdRect upgrade_progress_area(void) { return (EpdRect){52, 468, 580, 64};
 static void draw_upgrade_percent(uint8_t *fb) {
     uint32_t percent = upgrade_percent();
     EpdRect number = {496, 472, 132, 42};
-    epd_fill_rect(number, UI_GRAY_WHITE, fb);
+    ui_fill_rect_fast(number, UI_GRAY_WHITE, fb);
     char progress[32]; snprintf(progress, sizeof(progress), "%lu%%", (unsigned long)percent);
     ui_text_fixed(fb, 624, 477, 26, progress, EPD_DRAW_ALIGN_RIGHT, false);
     ui_image_bw_rect(fb, number);
 }
 static void draw_upgrade_progress(uint8_t *fb) {
-    epd_fill_rect(upgrade_progress_area(), UI_GRAY_WHITE, fb);
+    ui_fill_rect_fast(upgrade_progress_area(), UI_GRAY_WHITE, fb);
     draw_upgrade_percent(fb);
-    epd_fill_rect((EpdRect){60, 518, 564, 10}, UI_GRAY_BLACK, fb);
-    epd_fill_rect((EpdRect){61, 519, 562, 8}, UI_GRAY_WHITE, fb);
+    ui_fill_rect_fast((EpdRect){60, 518, 564, 10}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){61, 519, 562, 8}, UI_GRAY_WHITE, fb);
     s_upgrade_bar_width = (int)(562 * upgrade_percent() / 100);
     if (s_upgrade_bar_width)
-        epd_fill_rect((EpdRect){61, 519, s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+        ui_fill_rect_fast((EpdRect){61, 519, s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
 }
 static void draw_upgrade_progress_delta(uint8_t *fb) {
     int width = (int)(562 * upgrade_percent() / 100);
     if (width <= s_upgrade_bar_width) return;
     draw_upgrade_percent(fb);
-    epd_fill_rect((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
 // 排队时只改 UI 快照；本次画面推送结束后的 tick 才启动 TLS/擦写。
@@ -306,6 +302,7 @@ static int settings_main_row_height(void) {
 #define SETTINGS_WIRELESS_ROWS 3
 #define SETTINGS_DISPLAY_ROWS 6
 #define SETTINGS_PERSONAL_ROWS 4
+#define SETTINGS_MAINTENANCE_ROWS 4
 #define SETTINGS_WIRELESS_Y (180 + settings_profile_height() + 77)
 #define SETTINGS_DISPLAY_Y (SETTINGS_WIRELESS_Y + SETTINGS_WIRELESS_ROWS * SETTINGS_ROW_H + 78)
 #define SETTINGS_PERSONAL_Y (SETTINGS_DISPLAY_Y + SETTINGS_DISPLAY_ROWS * SETTINGS_ROW_H + 78)
@@ -318,7 +315,7 @@ static int settings_main_row_height(void) {
 // Main-page scroll limit: just enough to bring the last row of the last group above the nav bar,
 // with 8 px to spare.
 #define SETTINGS_SCROLL_MAX \
-    (SETTINGS_MAINTENANCE_Y + 3 * SETTINGS_ROW_H - UI_NAV_TOP + 12)
+    (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -761,6 +758,7 @@ static void setting_icon(uint8_t *fb, int index, int cx, int cy) {
         UI_ICON_EYE_CLOSED,        // 14 自动休眠
         UI_ICON_SLIDERS_HORIZONTAL, // 15 主页刷新模式 / Main refresh mode
         UI_ICON_LOCK,              // 16 锁屏密码 / lock screen password
+        UI_ICON_ROTATE_CW,         // 17 屏幕修复 / panel repair
     };
     if (index < 0 || index >= (int)(sizeof(icons) / sizeof(icons[0]))) return;
     ui_draw_icon(fb, cx, cy, SETTINGS_ICON_PX, icons[index], SETTINGS_ICON_INK);
@@ -821,11 +819,11 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_fill_round_rect(fb, (EpdRect){68,top,548,170}, 12, UI_GRAY_WHITE);
         for (int i=0;i<3;++i) {
             int y=top+9+i*52;
-            epd_fill_rect((EpdRect){86,y,31,43},i==1?0x80:0x40,fb);
-            epd_fill_rect((EpdRect){137,y+6,218,3},0,fb);
-            epd_fill_rect((EpdRect){137,y+19,84,2},0x70,fb);
-            epd_fill_rect((EpdRect){137,y+34,435,4},0xd0,fb);
-            epd_fill_rect((EpdRect){137,y+34,120+i*75,4},0x40,fb);
+            ui_fill_rect_fast((EpdRect){86,y,31,43},i==1?0x80:0x40,fb);
+            ui_fill_rect_fast((EpdRect){137,y+6,218,3},0,fb);
+            ui_fill_rect_fast((EpdRect){137,y+19,84,2},0x70,fb);
+            ui_fill_rect_fast((EpdRect){137,y+34,435,4},0xd0,fb);
+            ui_fill_rect_fast((EpdRect){137,y+34,120+i*75,4},0x40,fb);
         }
         return;
     }
@@ -833,7 +831,7 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
     for (int i = 0; i < 3; ++i) {
         int x = left + 20 + i * 155;
         EpdRect cover = {x, top, 116, 145};
-        epd_fill_rect(cover, i == 1 ? 0x60 : i == 2 ? 0xa0 : 0x40, fb);
+        ui_fill_rect_fast(cover, i == 1 ? 0x60 : i == 2 ? 0xa0 : 0x40, fb);
         ui_draw_round_rect(fb, cover, 1, 0x30);
         ui_draw_round_rect(fb, (EpdRect){x + 7, top + 7, 102, 130}, 1, i == 1 ? 0xc0 : 0xe0);
         ui_hairline(fb, top + 47, x + 28, 60, i == 1 ? 0xc0 : 0xe0);
@@ -841,7 +839,7 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_hairline(fb, top + 111, x + 44, 28, i == 1 ? 0xc0 : 0xe0);
     }
     if (style == 1) {
-        epd_fill_rect((EpdRect){left, top + 143, 486, 16}, 0x30, fb);
+        ui_fill_rect_fast((EpdRect){left, top + 143, 486, 16}, 0x30, fb);
         ui_hairline(fb, top + 143, left, 486, 0x80);
     } else if (style == 2) {
         ui_draw_acrylic_guard(fb, (EpdRect){left, top + 94, 486, 70});
@@ -853,8 +851,6 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
 // One 82x82 gray avatar, never a full frame or second font; file changes/removal invalidate it.
 static EXT_RAM_BSS_ATTR uint8_t s_avatar_pixels[82*82];
 static char s_avatar_path[288];
-static time_t s_avatar_mtime;
-static off_t s_avatar_size;
 static bool s_avatar_ready, s_avatar_pending;
 static char s_main_wifi[33];
 static bool s_main_wifi_saved;
@@ -864,7 +860,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     ui_clear_page(fb);
 
     if (s_page == SETTINGS_MAIN || s_page == SETTINGS_SHELF_STYLE)
-        epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP},
+        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP},
                       app_settings_main_fast_refresh() && s_page == SETTINGS_MAIN ? 0xf0 : 0xe0, fb);
     ui_nav_status(fb);
     if (s_page == SETTINGS_LOCK_PIN) {
@@ -1299,7 +1295,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         if (!l.device_rows)
             ui_text(fb, 44, l.devices_top - scroll + 18, 23, "附近还没有发现设备",
                     EPD_DRAW_ALIGN_LEFT, false);
-        epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
+        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
         ui_nav_status(fb);
         back_header(fb, "扫描设备");
         ui_nav_draw(fb, 3);
@@ -1373,7 +1369,7 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_text(fb, 48, l.footer_top, 20, "上下、左右及 PageUp / PageDown 均可翻页", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 48, l.footer_top + 34, 20, "仅支持 BLE 翻页器，按键只在阅读时生效", EPD_DRAW_ALIGN_LEFT, false);
-        epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
+        ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 190}, UI_GRAY_WHITE, fb);
         ui_nav_status(fb);
         back_header(fb, "蓝牙翻页器");
         ui_nav_draw(fb, 3);
@@ -1426,85 +1422,46 @@ static void render(app_ctx_t *ctx, uint8_t *fb) {
     const int personal_icons[]={4,5,16,10};
     setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
                   personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    const char *maintenance_labels[]={"系统升级","保存与恢复","BOOT 刷机"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","电脑刷机"};
-    const int maintenance_icons[]={12,8,13};
+    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机"};
+    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机"};
+    const int maintenance_icons[]={12,8,17,13};
     setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
-                  maintenance_icons,maintenance_labels,maintenance_values,3);
-    epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, 160},
+                  maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
+    // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
+    // The main list needs a notice line too: confirmation and the repair result land here, or a tap
+    // would have no answer at all.
+    ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, 160},
                   app_settings_main_fast_refresh() ? 0xf0 : 0xe0, fb);
     ui_nav_status(fb);
     ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
     ui_nav_draw(fb, 3);
-}
-
-// 主列表 1761px 内容压成一位约151KB，空闲时分两段准备；临时工作帧立即释放。
-// Pack the 1761px main content into about 151KB; prepare two idle slices and release the scratch frame immediately.
-static void settings_scroll_cache_release(void) {
-    free(s_scroll_cache); s_scroll_cache = NULL; s_scroll_cache_step = 0;
-}
-static bool settings_scroll_cache_prepare(app_ctx_t *ctx) {
-    if (s_page != SETTINGS_MAIN || s_scroll_cache_step >= 2 || s_avatar_pending ||
-        s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting || s_follow_scroll.settle_pending ||
-        ctx->consumed || (ctx->touch && ctx->touch->touched) || display_follow_busy()) return false;
-    if (epd_width() != 1216 || epd_height() != 684 || epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT) {
-        s_scroll_cache_step = 3; return false;
-    }
-    const int extent = UI_NAV_TOP - 160 + SETTINGS_SCROLL_MAX;
-    const size_t bytes = (size_t)684 * ((extent + 7) / 8), frame_bytes = (size_t)1216 * 684 / 2;
-    const uint32_t caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
-    if (!s_scroll_cache) {
-        if (heap_caps_get_free_size(caps) < bytes + frame_bytes + 1024u * 1024u) {
-            s_scroll_cache_step = 3; return false;
-        }
-        s_scroll_cache = heap_caps_calloc(bytes, 1, caps);
-        if (!s_scroll_cache) { s_scroll_cache_step = 3; return false; }
-    }
-    const int offset = s_scroll_cache_step ? SETTINGS_SCROLL_MAX : 0;
-    uint8_t *scratch = NULL;
-    const uint8_t *pixels = ctx->fb;
-    if (offset != s_main_scroll) {
-        if (heap_caps_get_free_size(caps) < frame_bytes + 1024u * 1024u ||
-            !(scratch = heap_caps_malloc(frame_bytes, caps))) {
-            settings_scroll_cache_release(); s_scroll_cache_step = 3; return false;
-        }
-        int saved = s_main_scroll; s_main_scroll = offset;
-        render(ctx, scratch); s_main_scroll = saved; pixels = scratch;
-    }
-    bool captured = ui_follow_cache_capture(s_scroll_cache, pixels, 1216, 684, 160, UI_NAV_TOP, extent, offset);
-    free(scratch);
-    if (captured) ++s_scroll_cache_step;
-    else { settings_scroll_cache_release(); s_scroll_cache_step = 3; }
-    return true;
 }
 
 static void settings_prepare_profile(void) {
     const char *path=app_settings_avatar_path();
-    struct stat st={0};
-    bool valid=!pico_boot_recovery() && path[0] && !stat(path,&st) && S_ISREG(st.st_mode);
-    if (!valid) { s_avatar_ready=false; s_avatar_path[0]=0; s_avatar_pending=false; return; }
-    if (!strcmp(path,s_avatar_path) && st.st_mtime==s_avatar_mtime && st.st_size==s_avatar_size) return;
+    if(pico_boot_recovery()||!path[0]){ui_avatar_request("",60);s_avatar_ready=s_avatar_pending=false;s_avatar_path[0]=0;return;}
+    if(strcmp(path,s_avatar_path))s_avatar_ready=false;
     snprintf(s_avatar_path,sizeof(s_avatar_path),"%s",path);
-    s_avatar_mtime=st.st_mtime; s_avatar_size=st.st_size;
-    s_avatar_ready=ui_wallpaper_avatar_cached(path,s_avatar_pixels,82); s_avatar_pending=!s_avatar_ready;
+    ui_avatar_request(path,82);
+    ui_avatar_state_t state=ui_avatar_poll(path,82,s_avatar_pixels);
+    s_avatar_ready=state==UI_AVATAR_READY;s_avatar_pending=state==UI_AVATAR_PENDING;
 }
 static void on_enter(app_ctx_t *ctx) {
     (void)ctx;
     pin_setup_close();
-    settings_scroll_cache_release();
     s_notice[0] = 0;
     s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
     s_collage_prepare_pending = false;
-    ui_follow_scroll_reset(&s_follow_scroll);
-    s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = false;
-    s_scroll_settle_present = false;
+    s_scroll_drag_consumed = s_scroll_present_pending = false;
     s_wallpaper_selected = -1;
     s_wallpaper_confirm = s_wallpaper_preview_ok = false;
     s_sync_pending = false;
     s_font_sync_confirm = false; s_font_sync_path[0] = 0;
     s_config_confirm = false;
+    s_panel_repair_pending = false;
     s_boot_pending = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = s_upgrade_confirm = false;
     (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved);
@@ -1543,47 +1500,34 @@ static bool ble_receive_feedback(void) {
 
 static app_redraw_t profile_editor_paint(app_ctx_t *ctx, bool field);
 static app_redraw_t on_tick(app_ctx_t *ctx) {
-    if (settings_scroll_page()) {
-        if (ctx->consumed) return APP_REDRAW_NONE;
-        if (s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting) {
-            bool handled;
-            app_redraw_t redraw = settings_scroll_feed(ctx, &handled);
-            if (redraw != APP_REDRAW_NONE) return redraw;
-            // 拖动时异步头像/蓝牙变化不得插入慢刷。/ Keep asynchronous avatar/BLE changes from inserting slow updates during contact.
-            if (display_follow_busy() && ctx->continuous_ready) {
-                s_scroll_present_pending = s_scroll_follow_present = true;
-                return APP_REDRAW_AREA;
-            }
-            if (s_follow_scroll.tracking || s_follow_scroll.swallow || s_follow_scroll.coasting) return APP_REDRAW_NONE;
+    // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
+    // Paint the final notice before the tick's full restoration; do not push the page twice on success.
+    if (s_panel_repair_pending) {
+        s_panel_repair_pending = false;
+        if (s_page != SETTINGS_MAIN) return APP_REDRAW_NONE;
+        s_scroll_present_pending = false;
+        snprintf(s_notice, sizeof(s_notice), "屏幕修复完成；若条纹仍在可再做一次");
+        render(ctx, ctx->fb);
+        if (display_panel_repair(ctx->hl) != EPD_DRAW_SUCCESS) {
+            snprintf(s_notice, sizeof(s_notice), "屏幕输出未完成，请稍后重试");
+            return APP_REDRAW_FULL;
         }
-        if (ctx->continuous_ready && display_follow_busy()) {
-            s_scroll_present_pending = s_scroll_follow_present = true;
-            return APP_REDRAW_AREA;
-        }
-        if (ui_follow_scroll_take_settle(&s_follow_scroll, ctx)) {
-            s_scroll_present_pending = true;
-            s_scroll_follow_present = false;
-            s_scroll_settle_present = true;
-            return APP_REDRAW_AREA;
-        }
-        // 下一次触摸可继续替换目标，灰阶与异步资料卡不能抢占待完成的滚动。
-        // New input may replace the target; neither gray restoration nor async profile work may interrupt it.
-        if (s_follow_scroll.settle_pending) return APP_REDRAW_NONE;
+        return APP_REDRAW_DONE;
     }
 
     if (s_page==SETTINGS_MAIN && s_avatar_pending && !(ctx->touch && ctx->touch->touched)) {
-        s_avatar_pending=false;
-        settings_scroll_cache_release();
-        s_avatar_ready=ui_wallpaper_prepare_avatar(s_avatar_path,s_avatar_pixels,82);
+        ui_avatar_state_t state=ui_avatar_poll(s_avatar_path,82,s_avatar_pixels);
+        s_avatar_pending=state==UI_AVATAR_PENDING;
+        s_avatar_ready=state==UI_AVATAR_READY;
         if (s_avatar_ready && s_main_scroll < 180+settings_profile_height()-160) {
             render(ctx,ctx->fb);
-            EpdRect area={36,180-s_main_scroll,612,settings_profile_height()};
+            EpdRect area={57,180-s_main_scroll+(settings_profile_height()-82)/2,82,82};
             if (area.y<160) { area.height-=160-area.y; area.y=160; }
-            guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,area));
+            if(area.height>0)guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
+                app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL?display_main_normal_waveform():display_main_gray_waveform(),MODE_GL16,area));
             return APP_REDRAW_DONE;
         }
     }
-    if (settings_scroll_cache_prepare(ctx)) return APP_REDRAW_NONE;
     if (s_page == SETTINGS_PIN_ENTRY) return pin_setup_tick(ctx);
     if (s_collage_prepare_pending && s_page == SETTINGS_LOCK_STYLE) {
         s_collage_prepare_pending = false;
@@ -1676,12 +1620,14 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
     uint32_t utc = 0;
     read_pico_transfer_status_t network = {0};
     read_pico_transfer_get_status(&network);
-    // 手动对时优先：自动对时若正占着会话就先交回，免得两次 SNTP 抢同一个连接。
-    // A manual sync goes first: auto-sync hands its session back so two SNTP runs never share a link.
-    app_time_sync_yield_radio();
+    // 手动对时优先：组件内的准入会在同一次调用里自动抢占后台对时。
+    // A manual sync goes first: the component's admission preempts an automatic run for us.
     esp_err_t err = read_pico_transfer_sync_time(&utc);
     bool network_time_received = err == ESP_OK;
     if (network_time_received) {
+        // 临时 WiFi 收尾可能耗时；写入 PMU 时取当前 S3 时间，避免回写旧秒数。
+        // Temporary WiFi teardown takes time; seed the PMU from the current S3 clock.
+        utc = (uint32_t)time(NULL);
         uint8_t payload[4] = {(uint8_t)utc, (uint8_t)(utc >> 8), (uint8_t)(utc >> 16), (uint8_t)(utc >> 24)};
         err = read_pico_pmu_cmd(PMU_CMD_TIME_SYNC, payload, sizeof(payload));
         if (err == ESP_OK) err = read_pico_pmu_cmd(PMU_CMD_TIME_GET, NULL, 0);
@@ -1690,9 +1636,9 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
             if (!pmu || !pmu->time_synced || pmu->unix_sec < utc || pmu->unix_sec - utc > 10)
                 err = ESP_ERR_INVALID_RESPONSE;
         }
-        // 手动对时也算一次成功，自动对时不必再联网重复。
-        // A manual sync counts as a success, so auto-sync need not go online again.
-        if (err == ESP_OK) app_time_sync_note_success(utc);
+        // 手动对时也算一次成功，后台对时不必再联网重复。
+        // A manual sync counts as a success, so background sync need not go online again.
+        if (err == ESP_OK) app_time_service_note_success(utc);
     }
     ESP_LOGI(TAG, "time sync network=%d ready=%d utc=%lu result=%s",
              network.mode, network.network_ready, (unsigned long)utc, esp_err_to_name(err));
@@ -1750,26 +1696,39 @@ save_text:
     return APP_REDRAW_PAGE;
 }
 
-// 手指直接跟随；松手按最近速度有界减速，新触摸立即停止。/ Follow directly; decelerate from recent velocity after lift, stopping on new contact.
-static bool settings_scroll_page(void) {
-    return s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN;
-}
-
-static app_redraw_t settings_scroll_feed(app_ctx_t *ctx, bool *handled) {
-    int limit = SETTINGS_SCROLL_MAX;
-    int *offset = &s_main_scroll;
-    if (s_page != SETTINGS_MAIN) {
-        int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
-        limit = bottom - UI_NAV_TOP + 12;
-        offset = &s_ble_scroll;
+// 越过阈值按段推进，一次手势只更新一次，松手不再播放惯性。
+// Advance one discrete step after crossing the threshold, with one update per gesture and no release inertia.
+static app_redraw_t scroll_gesture(const ui_gesture_event_t *ev, int *offset, int limit, bool *handled) {
+    *handled = ev->type != UI_GESTURE_TAP || s_scroll_drag_consumed;
+    if (ev->type == UI_GESTURE_PRESS) {
+        s_scroll_drag_consumed = false;
+        return APP_REDRAW_NONE;
     }
-    bool changed = ui_follow_scroll_feed(&s_follow_scroll, ctx, s_page == SETTINGS_MAIN ? 160 : 190,
-        UI_NAV_TOP, offset, limit, handled);
-    if (s_follow_scroll.settle_pending && !s_follow_scroll.tracking && !s_follow_scroll.coasting && app_settings_main_fast_refresh())
-        s_follow_scroll.settle_ms = ctx->now_ms;
-    if (!changed) return APP_REDRAW_NONE;
-    s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = true;
-    s_scroll_settle_present = false;
+    if (ev->type == UI_GESTURE_TAP || ev->type == UI_GESTURE_CANCEL) {
+        s_scroll_drag_consumed = false;
+        return APP_REDRAW_NONE;
+    }
+    if (ev->type != UI_GESTURE_MOVE && ev->type != UI_GESTURE_SWIPE_U && ev->type != UI_GESTURE_SWIPE_D)
+        return APP_REDRAW_NONE;
+    if (ev->y0 < (s_page == SETTINGS_MAIN ? 160 : 190) || ev->y0 >= UI_NAV_TOP)
+        return APP_REDRAW_NONE;
+    if (s_scroll_drag_consumed) {
+        if (ev->type != UI_GESTURE_MOVE) s_scroll_drag_consumed = false;
+        return APP_REDRAW_NONE;
+    }
+    int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
+    int distance = abs(dy);
+    if (ev->type == UI_GESTURE_MOVE && (distance < 108 || distance <= abs(dx))) return APP_REDRAW_NONE;
+    int step = distance < 204 ? 204 : distance > 450 ? 450 : distance;
+    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
+    int next = *offset + (up ? step : -step);
+    if (limit < 0) limit = 0;
+    if (next < 0) next = 0;
+    if (next > limit) next = limit;
+    if (ev->type == UI_GESTURE_MOVE) s_scroll_drag_consumed = true;
+    if (next == *offset) return APP_REDRAW_NONE;
+    *offset = next;
+    s_scroll_present_pending = true;
     return APP_REDRAW_AREA;
 }
 
@@ -1860,14 +1819,17 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         return APP_REDRAW_NONE;
     }
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
-    if (settings_scroll_page()) {
-        if (ev->type == UI_GESTURE_CANCEL) {
-            ui_follow_scroll_cancel(&s_follow_scroll, ctx->now_ms);
-            return APP_REDRAW_NONE;
+    if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {
+        int limit = SETTINGS_SCROLL_MAX;
+        int *offset = &s_main_scroll;
+        if (s_page != SETTINGS_MAIN) {
+            int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
+            limit = bottom - UI_NAV_REFRESH_END + 12;
+            offset = &s_ble_scroll;
         }
         bool handled;
-        app_redraw_t redraw = settings_scroll_feed(ctx, &handled);
-        if (handled || redraw != APP_REDRAW_NONE) return redraw;
+        app_redraw_t redraw = scroll_gesture(ev, offset, limit, &handled);
+        if (handled) return redraw;
     }
 
     if (s_page == SETTINGS_AVATAR && (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
@@ -2289,10 +2251,20 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
         else profile_editor_open(true);
         return APP_REDRAW_PAGE;
     }
-    if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+3*SETTINGS_ROW_H) {
+    if(y>=SETTINGS_MAINTENANCE_Y && y<SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_MAINTENANCE_Y)/SETTINGS_ROW_H;
         if(row==0)upgrade_open();
         else if(row==1){s_page=SETTINGS_CONFIG;s_config_confirm=false;s_notice[0]=0;}
+        else if(row==2){
+            // 屏幕在刷新中途断电会停在半帧，常规差分刷新永远盖不掉那道条纹；点一下就整屏盲刷
+            // 一遍，然后自己把当前页面（含底栏）推回面板。
+            // A power cut mid-refresh leaves the panel half-driven, and an ordinary differential
+            // refresh can never cover that stripe. One tap runs the blind full-screen pass, which
+            // then pushes the current page -- navigation bar included -- back onto the panel.
+            s_panel_repair_pending=true;
+            snprintf(s_notice,sizeof(s_notice),"屏幕修复中…");
+            return APP_REDRAW_PAGE;
+        }
         else {s_boot_pending=false;s_page=SETTINGS_BOOT;}
         return APP_REDRAW_PAGE;
     }
@@ -2330,8 +2302,6 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     return APP_REDRAW_NONE;
 }
 static void settings_exit(app_ctx_t *ctx) {
-    settings_scroll_cache_release();
-    ui_follow_scroll_reset(&s_follow_scroll);
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     pin_setup_close();
     s_collage_prepare_pending = false;
@@ -2339,8 +2309,6 @@ static void settings_exit(app_ctx_t *ctx) {
     (void)ctx; ui_keyboard_end(); pico_online_cancel_join(); ble_pt_scan_stop(); s_ble_learning = 0;
 }
 static void on_before_lock(app_ctx_t *ctx) {
-    settings_scroll_cache_release();
-    ui_follow_scroll_reset(&s_follow_scroll);
     s_font_sync_confirm=false;s_font_sync_path[0]=0;
     if (s_page == SETTINGS_PIN_ENTRY) { pin_setup_close(); s_page = SETTINGS_LOCK_PIN; }
     s_upgrade_job = UPGRADE_JOB_NONE;
@@ -2349,20 +2317,11 @@ static void on_before_lock(app_ctx_t *ctx) {
 }
 static bool no_menu_handle(app_ctx_t *ctx) { (void)ctx; return false; }
 static void settings_media_lost(app_ctx_t *ctx) {
-    settings_scroll_cache_release();
-    ui_follow_scroll_reset(&s_follow_scroll);
     (void)ctx; s_avatar_ready=s_avatar_pending=false; s_avatar_path[0]=0;
 }
-static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_scroll_cache_release(); settings_prepare_profile(); }
+static void settings_media_ready(app_ctx_t *ctx) { (void)ctx; settings_prepare_profile(); }
 static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
-    if (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL) {
-        settings_scroll_cache_release();
-        ui_follow_scroll_reset(&s_follow_scroll);
-        s_scroll_present_pending = s_scroll_follow_present = s_scroll_frame_changed = false;
-        s_scroll_settle_present = false;
-    }
-
     if (s_page == SETTINGS_PIN_ENTRY && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
         display_main_transition_cancel(); render(ctx, ctx->fb);
         guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, ui_pinpad_full()));
@@ -2384,25 +2343,12 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
          s_page == SETTINGS_SHELF_STYLE || s_page == SETTINGS_SYSTEM_FONT ||
          s_page == SETTINGS_WALLPAPER || s_page == SETTINGS_AVATAR)) {
         s_scroll_present_pending = false;
-        bool restore_gray = !s_scroll_settle_present || !app_settings_main_fast_refresh();
-        if (s_scroll_follow_present && s_scroll_frame_changed) {
-            bool cached = s_page == SETTINGS_MAIN && s_scroll_cache_step == 2 &&
-                ui_follow_cache_blit(s_scroll_cache, ctx->fb, 1216, 684, 160, UI_NAV_TOP,
-                                    UI_NAV_TOP - 160 + SETTINGS_SCROLL_MAX, s_main_scroll);
-            if (!cached) render(ctx, ctx->fb);
-        } else if (!s_scroll_follow_present && restore_gray) render(ctx, ctx->fb);
+        render(ctx, ctx->fb);
         int top = s_page == SETTINGS_MAIN ? 160 : s_page == SETTINGS_SHELF_STYLE ? 242 : 190;
-        EpdRect area = {0, top, UI_LOCK_WIDTH, UI_NAV_TOP - top};
+        EpdRect area = {0, top, UI_LOCK_WIDTH, UI_NAV_REFRESH_END - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
-        enum EpdDrawError result = s_scroll_follow_present
-            ? display_follow_area(ctx->hl, area, s_scroll_frame_changed, ctx->continuous_ready)
-            : display_follow_settle(ctx->hl, area, restore_gray);
-        s_scroll_frame_changed = false;
-        s_scroll_settle_present = false;
-        guard_draw_result(ctx->hl, result);
-        if (result != EPD_DRAW_SUCCESS) ui_follow_scroll_cancel(&s_follow_scroll, ctx->now_ms);
-        s_scroll_follow_present = false;
+        guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, area));
         return true;
     }
     if (s_page != SETTINGS_UPGRADE) return false;

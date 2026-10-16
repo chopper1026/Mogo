@@ -48,7 +48,7 @@ static void lock_icon(uint8_t *fb, int cx, int cy) {
             if (abs(x) == radius) epd_draw_line(cx + x, cy - 10, cx + x, cy - 1, UI_GRAY_BLACK, fb);
         }
     }
-    epd_fill_rect((EpdRect){cx - 1, cy + 8, 3, 7}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){cx - 1, cy + 8, 3, 7}, UI_GRAY_BLACK, fb);
 }
 
 void ui_quick_menu_draw(uint8_t *fb, bool wifi, bool bluetooth) {
@@ -72,7 +72,7 @@ void ui_quick_menu_draw(uint8_t *fb, bool wifi, bool bluetooth) {
     }
     // 状态栏留清晰白底，沿用系统时间/签名/电池；四图标与底栏共用Lucide细线44px。
     // Keep the system time/signature/battery legible on white; share navigation's 44px Lucide line icons.
-    epd_fill_rect((EpdRect){0, 0, width, 76}, UI_GRAY_WHITE, fb);
+    ui_fill_rect_fast((EpdRect){0, 0, width, 76}, UI_GRAY_WHITE, fb);
     ui_nav_status(fb);
     static const ui_icon_t icons[] = {UI_ICON_WIFI, UI_ICON_BLUETOOTH, UI_ICON_REFRESH_CW};
     for (int i = 0; i < 4; ++i) {

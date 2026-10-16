@@ -16,7 +16,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "read_pico_transfer.h"
-#include "time_sync.h"
+#include "time_service.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -103,10 +103,10 @@ static bool layout_valid(void) {
         a->size == 0x400000 && b->size == 0x400000 && data->address == 0xd10000 && data->size == 0x2000;
 }
 static bool online(bool *owned) {
-    // 升级独占无线：自动对时先交回自己的会话，下面停服/起服才不会牵到它仍以为自己是主人的会话。
-    // The updater owns the radio: auto-sync hands its session back so the stop/start below never
-    // touches a session it still believes it owns.
-    app_time_sync_yield_radio();
+    // 升级独占无线：在途的后台对时先取消，下面停服/起服才不会被它拖住。
+    // The updater owns the radio: an in-flight background sync cancels first, so the stop/start
+    // below is never held up by it.
+    app_time_service_cancel();
     read_pico_transfer_status_t status;
     read_pico_transfer_get_status(&status);
     if (!(status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready)) {
@@ -131,9 +131,10 @@ static bool online(bool *owned) {
                 if (read_pico_transfer_sync_time_online(&utc) != ESP_OK) {
                     state(PICO_UPDATE_FAILED, "网络对时失败，请对时后重试"); return false;
                 }
-                // 主机时钟已准，自动对时不必为了同一件事再开一次无线。
-                // The host clock is accurate now, so auto-sync need not open the radio for the same thing.
-                app_time_sync_note_success(utc);
+                // 主机时钟已准，后台对时不必为了同一件事再开一次无线。
+                // The host clock is accurate now, so background sync need not open the radio for
+                // the same thing.
+                app_time_service_note_success(utc);
             }
             return !atomic_load(&s_cancel);
         }

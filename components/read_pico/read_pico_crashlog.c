@@ -11,6 +11,7 @@
 
 #include "read_pico_crashlog.h"
 
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,9 @@ RTC_NOINIT_ATTR static char s_lines[RP_CRASH_LOG_LINES][RP_CRASH_LOG_LEN];
 RTC_NOINIT_ATTR static uint32_t s_written;
 RTC_NOINIT_ATTR static uint32_t s_magic;
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
+// 首屏后停止开机标记，普通回首页不挤占诊断轨迹；无需额外 RTC 存储。
+// Stop boot marks after the first frame so normal Home visits do not evict diagnostics; no extra RTC storage.
+static bool s_boot_marks_done;
 
 void rp_crash_log(const char *fmt, ...) {
     char line[RP_CRASH_LOG_LEN];
@@ -73,4 +77,10 @@ void rp_crash_log_clear(void) {
     s_magic = 0;
     s_written = 0;
     portEXIT_CRITICAL(&s_lock);
+}
+
+void rp_boot_mark(const char *name) {
+    if (s_boot_marks_done) return;
+    rp_crash_log("boot %s %ums", name ? name : "?", (unsigned)(esp_timer_get_time() / 1000));
+    if (name && strcmp(name, "frame") == 0) s_boot_marks_done = true;
 }

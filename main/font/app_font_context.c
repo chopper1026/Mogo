@@ -18,6 +18,7 @@
 #include "boot_state.h"
 #include "ttf_font.h"
 #include "ui_kit.h"
+#include "ui_nav.h"
 
 static bool s_reading;
 // Failed unchanged files are not repeatedly opened (opening unloads the active slot).
@@ -81,6 +82,7 @@ bool app_font_activate_system(void) {
     ui_text_set_system_font(!pico_boot_recovery() && chosen[0] && ttf_font_ready() &&
                            !strcmp(chosen, ttf_font_path()) && !ttf_font_is_builtin());
     ui_text_set_system_scale(true);
+    ui_nav_status_font_context(false, changed);
     return changed;
 }
 
@@ -92,6 +94,7 @@ bool app_font_activate_reading(void) {
     bool changed = activate(ttf_font_path_is_builtin(saved) ? TTF_FONT_BUILTIN : saved);
     ui_text_set_system_font(false);
     ui_text_set_system_scale(false);
+    ui_nav_status_font_context(true, changed);
     return changed;
 }
 
@@ -116,4 +119,5 @@ void app_font_end_lock(const app_lock_font_t *saved) {
     ui_text_set_system_font(!s_reading && !pico_boot_recovery() && chosen[0] &&
                            !strcmp(chosen, ttf_font_path()) && !ttf_font_is_builtin());
     ui_text_set_system_scale(!s_reading);
+    ui_nav_status_font_context(s_reading, false);
 }

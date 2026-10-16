@@ -35,6 +35,7 @@ enum {READ_PICO_TRANSFER_STOPPED, READ_PICO_TRANSFER_STARTING, READ_PICO_TRANSFE
 typedef struct {int mode,state;bool wifi_configured;char wifi_ssid[33];} read_pico_transfer_status_t;
 static read_pico_transfer_status_t s_status;
 static bool s_wifi,s_started,s_config_busy;
+static bool cancel_time_sync(bool automatic_only){(void)automatic_only;return true;}
 static void *s_http,*s_netif;
 #define portENTER_CRITICAL(lock) ((void)0)
 #define portEXIT_CRITICAL(lock) ((void)0)
@@ -96,6 +97,9 @@ with tempfile.TemporaryDirectory(prefix="kiikoread-wifi-forget-") as directory:
     source = work / "test.c"
     source.write_text(harness)
     cjson = ROOT / "managed_components/espressif__cjson/cJSON"
+    if not (cjson / "cJSON.c").exists():
+        import os
+        cjson = Path(os.environ["KIIKO_CJSON_DIR"])
     subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-misleading-indentation",
                     "-Wno-deprecated-declarations",
                     "-g", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",

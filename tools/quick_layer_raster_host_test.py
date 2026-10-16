@@ -71,6 +71,7 @@ static bool app_settings_main_fast_refresh(void){return fast;}
 static void *heap_caps_malloc(size_t n,unsigned caps){assert(caps==3&&n<=4096);++allocs;if((int)n>max_bytes)max_bytes=(int)n;if(oom)return NULL;++live;return malloc(n);}
 static void heap_caps_free(void *p){if(p){--live;free(p);}assert(live>=0);}
 '''
+code+='static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}\n'
 header=(root/'main/ui/ui_quick_menu.h').read_text()
 code+='\n'.join(re.findall(r'^#define UI_QUICK[^\n]*',header,re.M))+'\n'
 for name in ('ui_read_pixel','ui_image_bw_rect','icon_nibble','ui_draw_icon'):
@@ -125,7 +126,7 @@ int main(void){
  // 三种主页模式的底栏共用灰底：按压不能改外沿、文字、横条或相邻图标。
  // All three main modes share a gray footer: presses must preserve its perimeter, labels, marker and neighboring icons.
  static const ui_icon_t tabs[]={UI_ICON_HOUSE,UI_ICON_LIBRARY_BIG,UI_ICON_FOLDER_OPEN,UI_ICON_SLIDERS_HORIZONTAL};
- for(int tab=0;tab<4;++tab)for(int policy=0;policy<3;++policy){
+ for(int tab=0;tab<4;++tab)for(int policy=0;policy<3;++policy)for(int edge=0;edge<2;++edge){
   fast=policy==1;memset(frame,0xee,BYTES);
   int cx=(tab*2+1)*684/8;
   epd_fill_rect((EpdRect){0,1097,684,5},0,frame);
@@ -133,7 +134,12 @@ int main(void){
   ui_draw_icon(frame,cx,1141,44,tabs[tab],0);
   memcpy(saved,frame,BYTES);ui_click_feedback_begin(frame);
   ui_click_feedback_register(frame,(EpdRect){cx-30,1111,60,60},UI_CLICK_NAV,tabs[tab]);
-  assert(ui_click_feedback_press(frame,cx,1188,&r));
+  assert(!ui_click_feedback_press(frame,cx,UI_NAV_TOUCH_TOP-1,&r));
+  assert(!ui_click_feedback_press(frame,cx,1216,&r));
+  assert(!ui_click_feedback_press(frame,-1,UI_NAV_TOUCH_TOP,&r));
+  assert(!ui_click_feedback_press(frame,684,UI_NAV_TOUCH_TOP,&r));
+  assert(ui_click_feedback_press(frame,cx,edge?UI_NAV_TOUCH_TOP:1188,&r));
+  assert(!ui_click_feedback_cancel_at(cx,edge?UI_NAV_TOUCH_TOP+12:1188));
   for(int y=0;y<1216;++y)for(int x=0;x<684;++x){
    if(x<cx-25||x>=cx+25||y<1118||y>=1168)assert(pixel(frame,x,y)==pixel(saved,x,y));
   }

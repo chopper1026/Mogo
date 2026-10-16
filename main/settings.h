@@ -160,17 +160,14 @@ typedef enum {
     APP_READER_KEY_NEXT, ///< 下一页 / Next page
     APP_READER_KEY_TOOLS, ///< 阅读工具栏 / Reader toolbar
     APP_READER_KEY_FULLSCREEN, ///< 切换全屏 / Toggle full screen
-    APP_READER_KEY_HOME, ///< 返回首页 / Home
+    APP_READER_KEY_HOME, ///< 返回主页（本次开书来源） / Return to the opening origin
     APP_READER_KEY_REFRESH, ///< 手动全刷 / Manual full refresh
     APP_READER_KEY_NONE, ///< 不操作 / No action
-    // 追加在 NONE 之后：旧固件把 NONE 存为 6，插入会 reinterpret 旧 NVS/备份值。
-    // Appended after NONE: old builds stored NONE as 6; inserting would reinterpret old values.
-    APP_READER_KEY_SHELF, ///< 返回 / Back
     APP_READER_KEY_COUNT
 } app_reader_key_action_t;
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.
 app_reader_key_action_t app_settings_reader_key_action(unsigned key);
-/// 三键短按或中键长按至少有一个工具栏；允许性检查的3代表长按。/ Keep a toolbar action among three shorts or the middle hold; index 3 checks the hold.
+/// 仅验证按键与动作范围，不强制工具栏映射；3代表中键长按。/ Validate key/action ranges without requiring a toolbar mapping; 3 means middle hold.
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action);
 /// 返回是否成功保存；失败不改变映射。/ Return successful persistence, leaving the mapping unchanged on failure.
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action);

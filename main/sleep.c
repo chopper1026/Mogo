@@ -21,6 +21,8 @@
  * 冻结：沿用实际后缓冲，不把圆锁当白色；不增加帧副本，自动休眠/其他样式/失败回退保留原流程。
  * Frozen: Retain true history including the badge, add no frame copy and preserve idle/other-style/failure recovery.
  */
+#include "ui_avatar.h"
+#include "book_cover_jobs.h"
 
 #include "sleep.h"
 #include "boot_state.h"
@@ -43,7 +45,7 @@
 #include "display.h"
 #include "e0470_epaper_waveform.h"
 #include "ota_online.h"
-#include "time_sync.h"
+#include "time_service.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_sleep.h"
@@ -213,6 +215,7 @@ static bool pickup_wait_quiet(sc7a20h_handle_t acc, int quiet_ms, int timeout_ms
 }
 
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc, uint32_t timeout_ms) {
+    if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_KEY;
     bool pickup = acc != NULL && app_settings_pickup_wake();
     bool acc_armed = false;
     const int64_t deadline_us = timeout_ms
@@ -386,11 +389,11 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
     if (mode != APP_SLEEP_OFF && mode != APP_SLEEP_DEEP) return ESP_ERR_INVALID_ARG;
     // 产品页用 on_before_lock 保存并收齐后台；保留阅读内存以便交接失败仍可回到原页。
     // Product pages checkpoint/join in on_before_lock; retain reader state so a failed handoff can resume the same page.
-    // 自动对时的会话先交出：暂停会快照会话，浅睡唤醒后把它复活，那不是自动对时想要的。
-    // Hand the auto-sync session back first: pause snapshots sessions and the light-sleep wake revives
-    // them, which auto-sync never wants.
-    app_time_sync_yield_radio();
-    if (pico_online_busy() || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
+    // 后台对时与封面/头像任务先静默：暂停会快照会话，浅睡唤醒后把它复活，那不是对时想要的。
+    // Quiesce background time sync and cover/avatar jobs first: pause snapshots sessions and the
+    // light-sleep wake revives them, which a sync never wants.
+    app_time_service_cancel();
+    if (pico_online_busy() || !(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000)) || !read_pico_transfer_pause_for_sleep()) return ESP_ERR_INVALID_STATE;
     (void)ble_pt_stop(2000);
     (void)app_sync_time_to_pmu();
     // 必须先断面板轨，再拉低 MODE，避免常开逻辑仍耗电。/ Drop panel rails before parking MODE on the always-on supply.
@@ -452,10 +455,10 @@ void enter_lock_and_sleep(
     s_lock_feedback_visible = false;
     // Refuse to interrupt an active upload. The caller repaints its page when
     // this function returns, and the user can lock again after the transfer.
-    // 自动对时的会话同样先交回：它没有上传任务，锁屏不该被一次后台对时拖住。
-    // Auto time sync hands its session back too: it has no upload to protect, and a lock must never
+    // 后台对时同样先取消：它没有上传任务，锁屏不该被一次后台对时拖住。
+    // A background sync hands back too: it has no upload to protect, and a lock must never
     // wait on a background sync.
-    app_time_sync_yield_radio();
+    app_time_service_cancel();
     bool radio_paused = read_pico_transfer_pause_for_sleep();
     if (!radio_paused) {
         pico_boot_clear_resume();

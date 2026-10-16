@@ -12,6 +12,43 @@
 #include <stdlib.h>
 #define TAU 6.28318530718f
 typedef struct {uint8_t *fb;EpdRect bounds,clip;bool binary;unsigned phase,trail_start,trail_steps;} clock_canvas_t;
+typedef struct {EpdRect bounds,clip;int hour,minute,rotation;bool binary,valid;unsigned age;} clock_base_key_t;
+static uint8_t *s_base_cache;
+static clock_base_key_t s_base_keys[2];
+static unsigned s_base_age;
+void ui_home_clock_bind_base_cache(uint8_t *memory,size_t bytes){
+    if(bytes<UI_HOME_CLOCK_BASE_CACHE_BYTES)memory=NULL;
+    if(memory!=s_base_cache){s_base_cache=memory;memset(s_base_keys,0,sizeof(s_base_keys));}
+}
+static bool base_candidate(const clock_canvas_t *c,EpdRect *physical){
+    if(!s_base_cache||c->trail_steps||c->clip.width!=c->bounds.width||c->clip.height<c->bounds.height*9/10)return false;
+    *physical=ui_rotate_rect_to_fb(c->clip);
+    return !(physical->x&1)&&!(physical->width&1)&&
+        (size_t)physical->width*physical->height/2<=UI_HOME_CLOCK_BASE_CACHE_BYTES/2;
+}
+static bool base_key_matches(const clock_base_key_t *k,const clock_canvas_t *c,const struct tm *date){
+    return k->valid&&k->hour==date->tm_hour&&k->minute==date->tm_min&&k->binary==c->binary&&
+        k->rotation==epd_get_rotation()&&!memcmp(&k->bounds,&c->bounds,sizeof(EpdRect))&&!memcmp(&k->clip,&c->clip,sizeof(EpdRect));
+}
+static void base_copy(clock_canvas_t *c,EpdRect p,unsigned slot,bool restore){
+    uint8_t *cache=s_base_cache+slot*(UI_HOME_CLOCK_BASE_CACHE_BYTES/2);
+    size_t stride=(size_t)epd_width()/2,span=(size_t)p.width/2;
+    for(int y=p.y;y<p.y+p.height;++y){uint8_t *row=c->fb+(size_t)y*stride+p.x/2;
+        if(restore)memcpy(row,cache,span);else memcpy(cache,row,span);cache+=span;}
+}
+static bool base_restore(clock_canvas_t *c,const struct tm *date){
+    EpdRect p;if(!base_candidate(c,&p))return false;
+    for(unsigned i=0;i<2;++i)if(base_key_matches(&s_base_keys[i],c,date)){
+        base_copy(c,p,i,true);s_base_keys[i].age=++s_base_age;return true;}
+    return false;
+}
+static void base_store(clock_canvas_t *c,const struct tm *date){
+    EpdRect p;if(!base_candidate(c,&p))return;
+    unsigned i=!s_base_keys[0].valid?0:!s_base_keys[1].valid?1:s_base_keys[0].age<s_base_keys[1].age?0:1;
+    base_copy(c,p,i,false);
+    s_base_keys[i]=(clock_base_key_t){.bounds=c->bounds,.clip=c->clip,.hour=date->tm_hour,.minute=date->tm_min,
+        .rotation=epd_get_rotation(),.binary=c->binary,.valid=true,.age=++s_base_age};
+}
 static float clamp(float x,float lo,float hi){return fminf(hi,fmaxf(lo,x));}
 static EpdRect intersect(EpdRect a,EpdRect b){
     int x=fmaxf(a.x,b.x),y=fmaxf(a.y,b.y),xx=fminf(a.x+a.width,b.x+b.width),yy=fminf(a.y+a.height,b.y+b.height);
@@ -192,6 +229,7 @@ static void hands(clock_canvas_t *c,const struct tm *date,ui_home_clock_style_t 
             }
             pixel(c,x,y,gray,clamp(128.5f-r,0,1));
         }
+        base_store(c,date);
         float second=(c->phase%600)*TAU/600;disc(c,177+91*sinf(second),798-91*cosf(second),15,69,88);
     }
 }
@@ -245,6 +283,9 @@ void ui_home_clock_trail_draw_region(uint8_t *fb,EpdRect b,const struct tm *date
     if(style==UI_HOME_CLOCK_PS1995){ui_home_clock_draw(fb,b,date,binary);return;}
     clock_canvas_t c={fb,b,intersect(intersect(b,clip),(EpdRect){0,0,epd_rotated_display_width(),epd_rotated_display_height()}),binary,phase,trail_start,trail_steps>600?600:trail_steps};
     if(c.clip.width<=0||c.clip.height<=0)return;
+    if(style==UI_HOME_CLOCK_KEHAI&&base_restore(&c,date)){
+        float second=(phase%600)*TAU/600;disc(&c,177+91*sinf(second),798-91*cosf(second),15,69,88);return;
+    }
     if(style==UI_HOME_CLOCK_HOUSE)house(&c,date);
     else if(style==UI_HOME_CLOCK_DALI||style==UI_HOME_CLOCK_CAT){new_background(&c,style==UI_HOME_CLOCK_CAT);if(style==UI_HOME_CLOCK_CAT)cat_hands(&c,date);else dali_hands(&c,date);}
     else {background(&c,style-1);hands(&c,date,style);}

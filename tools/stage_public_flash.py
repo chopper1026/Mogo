@@ -73,6 +73,8 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     shutil.copytree(FLASH / "vendor/web", output / "vendor/web", dirs_exist_ok=True)
     shutil.copy2(FLASH / "vendor/LICENSE", output / "vendor/LICENSE")
     licenses = {
+        ROOT / "licenses/Apache-2.0.txt": "Apache-2.0.txt",
+        ROOT / "licenses/kiikoread-Personal-Study-1.0.txt": "kiikoread-Personal-Study-1.0.txt",
         FLASH / "licenses/LUCIDE-ISC.txt": "LUCIDE-ISC.txt",
         ROOT / "components/jpegdec/LICENSE": "JPEGDEC-APACHE-2.0.txt",
         ROOT / "licenses/LGPL-3.0.txt": "LGPL-3.0.txt",

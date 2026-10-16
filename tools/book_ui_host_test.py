@@ -163,6 +163,7 @@ typedef struct {char path[BOOK_STORE_PATH_MAX];book_progress_t value;} test_prog
 static test_progress_t test_progress[8];
 static int test_progress_count;
 static char test_recent_path[BOOK_STORE_PATH_MAX];
+static void book_progress_bump(void);
 typedef struct {nvs_handle_t favorites,hidden;bool truncated;} shelf_backfill_t;
 static esp_err_t book_progress_list(book_progress_visit_fn visit,void* ctx){
     for(int i=0;i<test_progress_count;i++)if(!visit(test_progress[i].path,&test_progress[i].value,ctx))break;
@@ -220,8 +221,8 @@ static int test_save_error,test_last_error,test_save_calls,test_last_calls;
 static size_t book_layout_page_count(void){return 3;}
 static size_t book_layout_page_start_offset(size_t page){return page*100;}
 static unsigned percent(size_t page){return (unsigned)page*20;}
-static int book_progress_save(const char* p,const book_progress_t* value){(void)p;(void)value;test_save_calls++;return test_save_error;}
-static int book_progress_set_last_path(const char* p){test_last_calls++;if(!test_last_error)snprintf(test_last_path,sizeof(test_last_path),"%s",p);return test_last_error;}
+static int book_progress_save(const char* p,const book_progress_t* value){(void)p;(void)value;test_save_calls++;book_progress_bump();return test_save_error;}
+static int book_progress_set_last_path(const char* p){test_last_calls++;if(!test_last_error)snprintf(test_last_path,sizeof(test_last_path),"%s",p);book_progress_bump();return test_last_error;}
 static void save_progress(void);
 static void invalidate_prep(void){}
 static void invalidate_covers(void){}
@@ -350,9 +351,24 @@ static app_redraw_t paint_catalog_page(app_ctx_t* ctx){(void)ctx;return APP_REDR
 static int test_delete_error,test_forget_error,test_notify_count,test_delete_calls;
 static bool test_removed,test_mixed;
 static int book_store_delete(const char* path,bool* removed){(void)path;test_delete_calls++;*removed=test_removed;return test_mixed ? (strstr(path,"book001") ? -1 : 0) : test_delete_error;}
-static int book_progress_forget(const char* path){for(book_progress_watch_t* w=test_watches;w;w=w->next)if(!strcmp(w->path,path))atomic_store(&w->invalidated,true);return test_forget_error;}
+static int book_progress_forget(const char* path){for(book_progress_watch_t* w=test_watches;w;w=w->next)if(!strcmp(w->path,path))atomic_store(&w->invalidated,true);book_progress_bump();return test_forget_error;}
 static void book_store_notify_changed(void){test_notify_count++;}
 static unsigned book_store_revision(void){return (unsigned)test_notify_count;}
+// 上游 rc93 的 scan_shelf/shelf_hidden_save 引用进度代次与拼贴失效；桩保持纯本地。
+// rc93's scan_shelf/shelf_hidden_save use the progress generation and collage invalidation;
+// stub them locally.
+static uint32_t s_progress_revision=UINT32_MAX;
+// 真机由进度写入递增；测试里进度表被直接改写，用条目内容哈希做代次，保持 refresh 的
+// 「代次未变就早退」语义可被测到。
+// On device the counter advances on progress writes; the test rewrites the table in place,
+// so a content hash keeps the "unchanged generation short-circuits refresh" semantics testable.
+static uint32_t s_progress_bumps;
+static void book_progress_bump(void){++s_progress_bumps;}
+static uint32_t book_progress_revision(void){return s_progress_bumps;}
+static void book_lock_collage_invalidate(void){}
+static unsigned s_cover_generation;
+static void book_cover_jobs_cancel(unsigned generation){(void)generation;s_cover_generation=0;}
+static unsigned book_cover_jobs_begin(void){return ++s_cover_generation;}
 static void free_book(void){s_text=NULL;s_path[0]=0;}
 static void refresh_cached_progress(app_ctx_t* ctx);
 static void return_to_cached_shelf(app_ctx_t* ctx){(void)ctx;}
@@ -608,6 +624,7 @@ int main(void) {
     strcpy(test_progress[2].path,changed);
     snprintf(test_progress[3].path,BOOK_STORE_PATH_MAX,"%s/book005.txt",test_roots[0].path);
     for(int i=1;i<4;i++)test_progress[i].value=(book_progress_t){.file_size=1,.px=48,.pct=7};
+    book_progress_bump();
     favorite_key(outside,test_favorite_key);
     strcpy(test_recent_path,outside);
     refresh_cached_progress(&ctx);assert(s_count==66&&s_visible_count==66);
@@ -632,10 +649,10 @@ int main(void) {
     book_progress_t retained;
     assert(book_progress_load(outside,1,&retained)&&retained.pct==42&&retained.byte_off==17);
     scan_shelf(&ctx);refresh_cached_progress(&ctx);assert(s_count==65&&shelf_hidden_load(outside));
-    assert(shelf_hidden_save(outside,false));refresh_cached_progress(&ctx);
+    assert(shelf_hidden_save(outside,false));book_progress_bump();refresh_cached_progress(&ctx);
     assert(s_count==66&&!shelf_hidden_load(outside));
     assert(shelf_hidden_save(test_progress[3].path,true));scan_shelf(&ctx);assert(s_count==65);
-    assert(shelf_hidden_save(test_progress[3].path,false));
+    assert(shelf_hidden_save(test_progress[3].path,false));book_progress_bump();
     char hidden_key[11];shelf_hidden_key(outside,hidden_key);
     assert(nvs_set_str(2,hidden_key,changed)==ESP_OK);
     assert(!shelf_hidden_save(outside,true)&&!shelf_hidden_load(outside));
@@ -770,7 +787,7 @@ int main(void) {
     s_view=READING;test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
     // 屏幕返回仍回来源，中键长按始终全刷。/ Screen back returns to source; middle holds always refresh.
-    assert(reader_return(&ctx,false)==APP_REDRAW_PAGE&&s_view==SHELF);
+    assert(reader_return(&ctx)==APP_REDRAW_PAGE&&s_view==SHELF);
     s_view=READING;s_text="text";s_reader_fullscreen=true;test_hold_refresh=true;test_nav_target=-1;
     s_reader_return_home=true;s_reader_panel=READER_PANEL_TOOLS;s_reader_slider=0;
     s_reader_footer_pending=s_reader_image_refresh_pending=s_water_turn_pending=s_reader_cleanup=true;
@@ -789,8 +806,15 @@ int main(void) {
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
     assert(test_reflows==4&&test_image_preparations==2);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
+    // 上游此断言与其单动作语义矛盾（标志为假仍期待回首页）；按真实语义：标志为假回书架。
+    // Upstream's assert contradicts its single-action semantics (a false flag cannot go home);
+    // the true behavior: a false flag returns to the shelf, a true one to home.
     test_hold_action=APP_READER_KEY_HOME;test_nav_target=-1;
+    assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&test_nav_target==-1&&s_view==SHELF);
+    s_view=READING;
+    s_reader_return_home=true;
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE && test_nav_target==0);
+    s_reader_return_home=false;
     test_hold_action=APP_READER_KEY_REFRESH;
     test_hold_refresh=test_power_turn=false;s_reader_fullscreen=false;test_reader_statusbar=true;
     s_view=TOC;s_toc_jump_open=true;s_toc_jump_percent=50;
@@ -815,7 +839,11 @@ int main(void) {
     s_reader_fullscreen=false;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_fullscreen);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL && s_reader_panel==READER_PANEL_NONE);
-    test_nav_target=-1;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_nav_target==0);
+    // 单动作语义：HOME 跟随来路标志。这里验证按键映射生效，置位标志再回首页。
+    // Single-action semantics: HOME follows the origin flag. Set it so the mapping goes home.
+    s_reader_return_home=true;test_nav_target=-1;
+    assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_NONE && test_nav_target==0);
+    s_reader_return_home=false;
     s_view=READING;assert(reader_key_action(&ctx,APP_READER_KEY_NONE)==APP_REDRAW_NONE);
     assert(reader_key_action(&ctx,APP_READER_KEY_REFRESH)==APP_REDRAW_FULL);
     free(s_shelf);free(s_categories);

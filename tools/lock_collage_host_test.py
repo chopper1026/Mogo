@@ -105,15 +105,21 @@ size_t heap_caps_get_free_size(int caps){(void)caps;return capacity-live;}
 size_t heap_caps_get_largest_free_block(int caps){(void)caps;return capacity-live;}
 static unsigned font_stats,book_stats;
 static size_t cache_payload_read;
+static unsigned directory_scans;
+#include <dirent.h>
+static DIR *counted_opendir(const char *p){++directory_scans;return opendir(p);}
 static int host_stat(const char *p,struct stat *s){if(!strcmp(p,ttf_font_path()))++font_stats;else ++book_stats;return stat(p,s);}
 static size_t host_fread(void *p,size_t n,size_t c,FILE *f){size_t r=fread(p,n,c,f);if(n*c>512)cache_payload_read+=n*r;return r;}
 #define stat(...) host_stat(__VA_ARGS__)
 #define fread host_fread
 #define free host_free
+#define opendir counted_opendir
 #include "book_lock_collage.c"
+#undef opendir
 #undef stat
 #undef fread
 #undef free
+unsigned book_store_revision(void){return 0;}
 const char *app_settings_device_name(void){return profile;}
 const char *app_settings_fonts_dir(void){return "/absent";}
 const char *app_settings_font_path(void){return "builtin";}
@@ -156,9 +162,9 @@ int main(int argc,char **argv){
  lock_placement_t p[30];assert(make_placements(lib,p)==30);
  for(unsigned i=0;i<30;++i){const lock_book_t *b=&lib->books[p[i].index];assert(fabsf(p[i].w/334.f-(float)b->source_w/b->source_h)<.00001f);if(i%5)assert(fabsf(p[i].x-p[i-1].x-p[i-1].w-18.f)<.001f);}
  host_free(lib);assert(decoded==15);
- char hidden[256];snprintf(hidden,sizeof(hidden),"%s/books/nested/01.epub",fixtures);hidden_path=hidden;
+ char hidden[256];snprintf(hidden,sizeof(hidden),"%s/books/nested/01.epub",fixtures);hidden_path=hidden;book_lock_collage_invalidate();
  lib=library_load();assert(lib&&lib->count==14&&lib->used==14);host_free(lib);
- hidden_path="different path with colliding key";lib=library_load();assert(lib&&lib->count==15);host_free(lib);hidden_path=NULL;
+ hidden_path="different path with colliding key";book_lock_collage_invalidate();lib=library_load();assert(lib&&lib->count==15);host_free(lib);hidden_path=NULL;book_lock_collage_invalidate();
  // 书架空闲预生成不保留像素，正式锁屏读取同样的原比例缓存。
  // Idle shelf warming retains no pixels; the final lock consumes identical aspect-preserved caches.
  size_t before_warm=live;
@@ -180,7 +186,9 @@ int main(int argc,char **argv){
  book_lock_collage_cache_commit(other);missing=fopen(LOCK_CACHE_DIR "/collage.bin","rb");assert(!missing);
  assert(book_lock_collage_prepare(other));book_lock_collage_cache_commit(other);assert(!s_pending_frame);
  unsigned plots_before=plotted;assert(book_lock_collage_draw(other)&&plotted==plots_before&&!memcmp(fb,other,LOCK_FRAME_BYTES));
+ unsigned scans_before=directory_scans;
  for(unsigned i=0;i<4;++i){assert(book_lock_collage_draw(other));assert(!memcmp(fb,other,LOCK_FRAME_BYTES)&&live==warm&&cover_requests==requests);}
+ assert(directory_scans==scans_before);
  // A timestamp-only progress save keeps identical artwork and bypasses rasterization entirely.
  unsigned previous_plots=plotted;recent_bump=100;
  assert(book_lock_collage_draw(other)&&!memcmp(fb,other,LOCK_FRAME_BYTES));
@@ -218,7 +226,7 @@ int main(int argc,char **argv){
  lib=library_load();assert(lib&&lib->count==1&&lib->used==1);host_free(lib);assert(book_lock_collage_draw(other));
  snprintf(path,sizeof(path),"%s/books/nested/00.epub",fixtures);assert(remove(path)==0);lib=library_load();assert(lib&&lib->count==0&&!lib->used);host_free(lib);assert(book_lock_collage_draw(other));
  printf("PASS: real imported TTF collage; 15 original ratios / 15-degree tilt / 18px gaps / 16-gray; cache reuse+corruption, 0/1/15 books and allocation failure cleanup. Peak PSRAM working allocation=%zu bytes\n",peak);
- ttf_font_unload();printf("Retained shared TTF I/O workspace=%zu bytes\n",live);assert(live==shared_io);free(fb);free(other);
+ book_lock_collage_invalidate();ttf_font_unload();printf("Retained shared TTF I/O workspace=%zu bytes\n",live);assert(live==shared_io);free(fb);free(other);
 }
 '''
     (work/'test.c').write_text(unit)

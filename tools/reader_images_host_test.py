@@ -137,6 +137,8 @@ static void epd_draw_pixel(int x,int y,uint8_t gray,uint8_t *fb){
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inv){
  (void)fb;(void)align;(void)inv;assert(x>=body.x&&x<=body.x+body.width&&y-px/2>=body.y&&y+px/2<=body.y+body.height&&text);++notices;
 }
+static const char s_path[]="test";
+static void book_excerpt_offer(const char *path,const html_text_t *text){(void)path;(void)text;}
 static char *s_text;
 static blk_t *s_blocks;
 static html_run_t *s_runs;
@@ -144,7 +146,7 @@ static size_t s_run_count;
 static void book_layout_set_runs(const html_run_t *runs,size_t count){(void)runs;(void)count;}
 static size_t s_text_len,s_block_count,s_selected_toc=2,s_jump_offset,s_jump_page;
 static size_t s_chapter_lead_skip;
-static unsigned s_chapter_lead_height;
+static unsigned s_chapter_lead_height,s_chapter_lead_row_height;
 static unsigned s_chapter_lead_width;
 static int s_px=10,s_view=READING;
 static char s_message[128],s_chapter_heading_title[128],s_chapter_heading_label[32],s_title[128],s_font_path[128];
@@ -165,7 +167,8 @@ static esp_err_t book_chapter_load_blocks_target(size_t chapter,const char *anch
 }
 static void book_layout_set_chapter_lead(size_t skip,unsigned height){(void)skip;(void)height;}
 static void book_layout_set_chapter_lead_width(unsigned px){(void)px;}
-static void apply_chapter_lead(const char *title,const char *label,size_t skip){
+static void apply_chapter_lead(const char *title,const char *label,size_t skip,unsigned height){
+ (void)height;
  (void)title;(void)label;s_chapter_lead_skip=skip;s_chapter_lead_height=0;s_chapter_lead_width=0;
  book_layout_set_chapter_lead(skip,0);
 }
@@ -183,7 +186,7 @@ static void free_book(void){
  book_layout_set_image_dims(NULL,NULL);s_reader_dims_ctx=(reader_dims_ctx_t){0};
 }
 '''
-for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'load_chapter_at'):
+for name in ('inline_ink_gray', 'reader_image_slots', 'reader_image_slot', 'reader_image_dims', 'alloc_page_bitmap', 'release_page_images', 'prepare_inline_image', 'draw_reader_images', 'heading_text_matches', 'load_chapter_at'):
     unit += '\n' + function(name)
 unit += r'''
 static void setup_images(int count){
@@ -194,6 +197,10 @@ static void setup_images(int count){
 }
 int main(void){
  uint8_t fb=0;
+ // Text-to-text within one layout keeps prefetch; image pages and reflows still invalidate it.
+ setup_images(0);prepare_inline_image();unsigned prior_invalidations=invalidations;
+ ++s_page;prepare_inline_image();assert(invalidations==prior_invalidations);
+ ++generation;prepare_inline_image();assert(invalidations==prior_invalidations+1);
  setup_images(12);prepare_inline_image();assert(reads==12&&decodes==12&&s_page_image_count==12);
  draw_reader_images(&fb,s_page,body);assert(pixels==12*20*6&&!notices);
  prepare_inline_image();assert(reads==12);

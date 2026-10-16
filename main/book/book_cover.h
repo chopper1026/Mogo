@@ -51,3 +51,15 @@ bool book_cover_fast_cache_read(const char *path, const char *title, const char 
                                 book_fast_cover_key_t key, uint8_t *out, bool *white_edge);
 void book_cover_fast_cache_write(const char *path, const char *title, const char *author,
                                  book_fast_cover_key_t key, const uint8_t *out, bool white_edge);
+
+/// 仅文件/图像工作，不调用字库；1完成、0需要UI生成封面、-1失败。
+/// File/image work only, no font calls:1 ready,0 UI-generated cover needed,-1 failure.
+int book_cover_load_io(const char *path,const char *title,const char *author,uint8_t *out,bool list,unsigned *width,unsigned *height,bool *auto_cache);
+/// 仅读取有效列表缓存的尺寸头，点阵命中时无需分配灰阶像素。/ Read validated list dimensions without a gray allocation on a packed-cache hit.
+bool book_cover_list_cache_dimensions(const char *path,const char *title,const char *author,unsigned *width,unsigned *height);
+/// 后台持久化UI生成的176x240封面。/ Persist an UI-generated176x240 cover in the worker.
+void book_cover_store_generated(const char *path,const char *title,const char *author,const uint8_t *pixels,bool list,int64_t size,int64_t modified);
+
+/// 异步结果仅在来源尺寸/修改时间仍匹配时持久化，防止换书后固化旧像素。
+/// Persist asynchronous pixels only under their original source identity, never a replaced book's key.
+void book_cover_fast_cache_write_checked(const char *path,const char *title,const char *author,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified);

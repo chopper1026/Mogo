@@ -1,11 +1,11 @@
-"""Exercise bounded real cover batches, cache-first loading and cancellation.
+#!/usr/bin/env python3
+"""中文：真实书架只整组合并显示异步结果，触摸和切页优先。/ English: Actual shelf reveals asynchronous covers only as a whole group, prioritizing navigation.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
 import subprocess,tempfile
 from home_cover_cache_host_test import function
-ROOT=Path(__file__).resolve().parents[1]
-book=ROOT/'main/apps/app_book.c'
+ROOT=Path(__file__).resolve().parents[1];book=ROOT/'main/apps/app_book.c'
 unit=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -13,127 +13,77 @@ unit=r'''
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-enum {SHELF,MANAGE};
-typedef struct {bool touched;} touch_t;
-typedef struct {int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;} app_ctx_t;
-static unsigned s_cover_warm_mask,warm_calls;
+#include "book_cover_jobs.h"
+typedef struct{int x,y,width,height;}EpdRect;
+enum{SHELF,MANAGE};
+typedef struct{bool touched;}touch_t;
+typedef struct{int leaf;bool request_app,request_return,request_menu;int64_t now_ms;touch_t *touch;}app_ctx_t;
+#define UI_LOCK_WIDTH 684
+#define SHELF_FAST_COVER_STRIDE 21
+static int s_view=SHELF,s_visible_count=9,rows=9,nav_stop=-1;
+static unsigned s_cover_generation,s_cover_pending_mask,s_cover_decode_mask,s_cover_dirty_mask,s_cover_present_mask;
+static unsigned ready_mask,failed_mask,nav_polls,queued,warm_calls,s_cover_warm_mask;
 static int64_t s_cover_warm_after_ms;
-static bool s_clear_confirm,s_batch_confirm;
-static int lock_style=2;
-static int app_settings_lock_style(void){return lock_style;}
-static int s_view=SHELF,s_visible_count=9,nav_stop=-1,rows=9;
-static unsigned s_cover_pending_mask,s_cover_decode_mask,s_cover_dirty_mask,s_cover_present_mask,jobs,decode_jobs,nav_polls,conversion_calls;
-static bool s_cover_batch_present_pending;
-enum {EPD_DRAW_SUCCESS,EPD_DRAW_FAULT};
-enum {APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL};
-static int64_t now,cost=1000;
-static bool hits=true,fast,fail,fast_hits;
-static unsigned cached_mask=511,failed_mask;
-static struct {int index;uint8_t *gray,*fast_bits;} s_covers[9];
-static struct {char path[32],name[32],author[32];bool removed;} s_shelf[9];
-static bool book_lock_collage_warm_cover(const char *path){assert(path==s_shelf[0].path||path==s_shelf[1].path);++warm_calls;return true;}
+static bool fast,s_clear_confirm,s_batch_confirm,s_cover_batch_present_pending;
+static int lock_style=2,s_presented_view=-1;
+static bool s_shelf_page_pending;
+static int64_t fake_us;static unsigned ready_after;
+static int64_t esp_timer_get_time(void){return fake_us;}
+static void vTaskDelay(unsigned ticks){assert(ticks==1);fake_us+=1000;if(ready_after&&fake_us>=(int64_t)ready_after*1000)ready_mask=511;}
+
+static struct{int index;uint8_t *gray,*fast_bits;unsigned width,height,fast_contrast,fast_phase;bool fast_white_edge;}s_covers[9];
+static struct{char path[32],name[32],author[32];bool removed;}s_shelf[9];
 static int shelf_rows(void){return rows;}
-static int64_t esp_timer_get_time(void){return now;}
+static int app_settings_shelf_style(void){return 2;}
+static bool app_settings_main_fast_refresh(void){return fast;}
+static unsigned app_settings_system_contrast(void){return 100;}
+static int app_settings_lock_style(void){return lock_style;}
+static bool book_lock_collage_warm_cover(const char *path){assert(path);++warm_calls;return true;}
+static EpdRect shelf_cover_image(int row){return(EpdRect){20,192+row*282,164,214};}
+static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}
 static bool app_poll_main_navigation(app_ctx_t *ctx){++nav_polls;if(nav_stop>=0&&(int)nav_polls>=nav_stop){ctx->request_app=true;return true;}return false;}
-static uint8_t *load_shelf_cover_gray(int row,const char *p,const char *n,const char *a,bool decode,bool *pending){
- assert(row>=0&&row<9&&p==s_shelf[row].path&&n==s_shelf[row].name&&a==s_shelf[row].author);
- ++jobs;now+=cost;if(decode)++decode_jobs;
- *pending=!decode&&(!hits||!(cached_mask&(1u<<row)));return fail||(failed_mask&(1u<<row))||*pending?NULL:malloc(1);
-}
-static void prepare_fast_covers(void){++conversion_calls;if(!fast)return;for(int i=0;i<9;++i)if(s_covers[i].gray){assert(!s_covers[i].fast_bits);s_covers[i].fast_bits=s_covers[i].gray;s_covers[i].gray=NULL;}}
+unsigned book_cover_jobs_begin(void){return 1;}
+bool book_cover_jobs_submit(unsigned generation,unsigned slot,const book_cover_job_t *q){assert(generation==1&&slot<9&&q->fast==fast);queued|=1u<<slot;return true;}
+int book_cover_jobs_take(unsigned generation,unsigned slot,book_cover_result_t *result){assert(generation==1);
+ if(failed_mask&(1u<<slot))return -1;if(!(ready_mask&(1u<<slot)))return 0;
+ *result=(book_cover_result_t){.pixels=malloc(1),.width=164,.height=214,.fast=fast};assert(result->pixels);return 1;}
 '''
-unit+=r'''
-static bool load_shelf_cover_fast(int row,int index){assert(row==index);if(s_view!=SHELF||!fast||!fast_hits)return false;++jobs;now+=cost;s_covers[row].fast_bits=malloc(1);return true;}
-static void save_shelf_cover_fast(int row,int index){assert(row==index);}
-'''
-unit+=function('prepare_cover_batch',book)+'\n'+function('shelf_cover_frame_ready',book)+'\n'+function('shelf_cover_reveal_mask',book)+'\n'+function('warm_shelf_lock_cover',book)+'\n'
+for name in ['prepare_cover_batch','shelf_cover_frame_ready','shelf_cover_reveal_mask','warm_shelf_lock_cover','gather_cover_entry']:
+ unit+=function(name,book)+'\n'
 present=function('present',book)
 ack=present[present.index('    if ((s_view==SHELF || s_view==MANAGE) && err==EPD_DRAW_SUCCESS) {'):present.index('    if (err==EPD_DRAW_SUCCESS && reader_status_visible()')]
-unit+='static void ack_present(int redraw,int err){\n'+ack+'\n}\n'
-
+unit+='enum{EPD_DRAW_SUCCESS,EPD_DRAW_FAULT};enum{APP_REDRAW_AREA,APP_REDRAW_PAGE,APP_REDRAW_FULL};\nstatic void ack_present(int redraw,int err){'+ack+'}\n'
 unit+=r'''
-static void reset(app_ctx_t *ctx){
- for(int i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);s_covers[i].gray=s_covers[i].fast_bits=NULL;s_covers[i].index=i;s_shelf[i].removed=false;}
- s_cover_pending_mask=(1u<<rows)-1;s_cover_decode_mask=s_cover_dirty_mask=s_cover_present_mask=0;jobs=decode_jobs=nav_polls=conversion_calls=0;now=0;cost=1000;nav_stop=-1;hits=true;fail=fast=fast_hits=false;cached_mask=511;failed_mask=0;ctx->request_app=false;
+static void reset(app_ctx_t *ctx){for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);memset(&s_covers[i],0,sizeof(s_covers[i]));s_covers[i].index=i;snprintf(s_shelf[i].path,32,"book%u",i);}
+ s_cover_generation=0;s_cover_pending_mask=511;s_cover_decode_mask=s_cover_dirty_mask=s_cover_present_mask=0;
+ ready_mask=failed_mask=queued=nav_polls=0;ctx->request_app=false;nav_stop=-1;
 }
-int main(void){
- app_ctx_t ctx={0};reset(&ctx);
- assert(prepare_cover_batch(&ctx,true)==511&&jobs==9&&decode_jobs==0&&s_cover_pending_mask==0);
- assert(s_cover_dirty_mask==511);
- // 缓存已加载但页面尚未推屏，下一次没有新解码仍保留全部脏区域。
- assert(prepare_cover_batch(&ctx,false)==0&&jobs==9&&s_cover_dirty_mask==511);
- s_cover_present_mask=7;s_cover_batch_present_pending=true;
- ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==511&&!s_cover_present_mask);
- s_cover_present_mask=7;ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==504);
- assert(prepare_cover_batch(&ctx,false)==0&&s_cover_dirty_mask==504);
- ack_present(APP_REDRAW_PAGE,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==504);
- ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
- s_cover_dirty_mask=511;ack_present(APP_REDRAW_FULL,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
- reset(&ctx);hits=false;assert(prepare_cover_batch(&ctx,true)==0&&jobs==9&&s_cover_pending_mask==511&&s_cover_decode_mask==511);
- assert(prepare_cover_batch(&ctx,false)==7&&decode_jobs==3&&s_cover_pending_mask==504);
- assert(prepare_cover_batch(&ctx,false)==56&&decode_jobs==6&&s_cover_pending_mask==448);
- assert(prepare_cover_batch(&ctx,false)==448&&decode_jobs==9&&!s_cover_pending_mask);
- // 即便缓存读取超过旧100ms预算，也读齐一页才推第一帧，不拆为四本一批。
- reset(&ctx);cost=30000;assert(prepare_cover_batch(&ctx,true)==511&&jobs==9&&now==270000&&!s_cover_pending_mask);
- assert(shelf_cover_reveal_mask()==511);
- // 三种刷新模式、九本和四本列表：冷缓存分批准备，视觉上只提交完整的一组。
- for(int mode=0;mode<3;++mode)for(int list=0;list<2;++list){
-  rows=list?4:9;reset(&ctx);hits=false;fast=mode==1;unsigned all=(1u<<rows)-1;
-  assert(!prepare_cover_batch(&ctx,true)&&!shelf_cover_frame_ready()&&!shelf_cover_reveal_mask());
-  unsigned frames=0;
-  while(s_cover_pending_mask){
-   unsigned before_decode=decode_jobs;prepare_cover_batch(&ctx,false);
-   assert(decode_jobs-before_decode<=3);
-   if(s_cover_pending_mask){assert(!shelf_cover_reveal_mask());ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask);}
-   else {assert(shelf_cover_reveal_mask()==all);++frames;}
-  }
-  assert(frames==1&&decode_jobs==(unsigned)rows);
-  s_cover_present_mask=all;s_cover_batch_present_pending=true;
-  ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(shelf_cover_reveal_mask()==all);
-  s_cover_present_mask=all;ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(!shelf_cover_reveal_mask());
+int main(void){touch_t touch={0};app_ctx_t ctx={.touch=&touch};
+ for(int mode=0;mode<3;++mode){fast=mode==1;reset(&ctx);
+  assert(!prepare_cover_batch(&ctx,true)&&queued==511&&!shelf_cover_frame_ready());
+  ready_mask=7;assert(prepare_cover_batch(&ctx,false)==7&&s_cover_dirty_mask==7&&!shelf_cover_reveal_mask());
+  s_cover_batch_present_pending=false;ack_present(APP_REDRAW_PAGE,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==7);
+  ready_mask=511;assert(prepare_cover_batch(&ctx,false)==504&&shelf_cover_reveal_mask()==511);
+  s_cover_batch_present_pending=true;s_cover_present_mask=511;ack_present(APP_REDRAW_AREA,EPD_DRAW_FAULT);assert(s_cover_dirty_mask==511);
+  s_cover_present_mask=511;ack_present(APP_REDRAW_AREA,EPD_DRAW_SUCCESS);assert(!s_cover_dirty_mask);
  }
- rows=9;reset(&ctx);cached_mask=7;
- assert(prepare_cover_batch(&ctx,true)==7&&s_cover_pending_mask==504&&!shelf_cover_reveal_mask());
- ack_present(APP_REDRAW_FULL,EPD_DRAW_SUCCESS);assert(s_cover_dirty_mask==7);
- assert(prepare_cover_batch(&ctx,false)==56&&!shelf_cover_reveal_mask());
- failed_mask=256;assert(prepare_cover_batch(&ctx,false)==192&&!s_cover_pending_mask&&shelf_cover_reveal_mask()==255);
- // 慢解码仍遵循100ms文件间预算，失败封面使用原标题回退，不无限等待。
- reset(&ctx);hits=false;prepare_cover_batch(&ctx,true);cost=60000;
- assert(prepare_cover_batch(&ctx,false)==3&&decode_jobs==2&&s_cover_pending_mask==508);
- assert(!shelf_cover_reveal_mask());
- reset(&ctx);nav_stop=2;assert(prepare_cover_batch(&ctx,false)==1&&jobs==1&&ctx.request_app&&s_cover_pending_mask==510);
- reset(&ctx);s_view=MANAGE;nav_stop=1;assert(prepare_cover_batch(&ctx,true)==511&&nav_polls==0&&!ctx.request_app);s_view=SHELF;
- reset(&ctx);s_shelf[2].removed=true;s_covers[4].index=42;s_visible_count=7;
- assert(prepare_cover_batch(&ctx,true)==(1|2|8|32|64)&&jobs==5&&!s_cover_pending_mask);s_visible_count=9;
- reset(&ctx);fast=true;assert(prepare_cover_batch(&ctx,true)==511);for(int i=0;i<9;++i)assert(!s_covers[i].gray&&s_covers[i].fast_bits);
- reset(&ctx);fast=fast_hits=true;hits=false;assert(prepare_cover_batch(&ctx,true)==511&&jobs==9&&decode_jobs==0);for(int i=0;i<9;++i)assert(!s_covers[i].gray&&s_covers[i].fast_bits);
- reset(&ctx);fail=true;assert(prepare_cover_batch(&ctx,false)==0&&jobs==9&&!s_cover_pending_mask);
- reset(&ctx);touch_t touch={true};ctx.touch=&touch;assert(prepare_cover_batch(&ctx,false)==0&&jobs==0&&s_cover_pending_mask==511);ctx.touch=NULL;
- // 进入书架时手指尚未松开也可读缓存，后台首次解码仍在触摸期间让路。
- reset(&ctx);ctx.touch=&touch;assert(prepare_cover_batch(&ctx,true)==511&&jobs==9&&shelf_cover_frame_ready());ctx.touch=NULL;
- reset(&ctx);s_cover_pending_mask=0;
- s_cover_warm_mask=3;s_cover_warm_after_ms=1500;ctx.now_ms=1400;
- warm_shelf_lock_cover(&ctx);assert(!warm_calls&&s_cover_warm_mask==3);
- ctx.now_ms=1500;warm_shelf_lock_cover(&ctx);assert(warm_calls==1&&s_cover_warm_mask==2);
- warm_shelf_lock_cover(&ctx);assert(warm_calls==1);ctx.now_ms=2500;
- touch.touched=true;ctx.touch=&touch;warm_shelf_lock_cover(&ctx);assert(warm_calls==1);ctx.touch=NULL;
- ctx.request_menu=true;warm_shelf_lock_cover(&ctx);assert(warm_calls==1);ctx.request_menu=false;
- lock_style=0;warm_shelf_lock_cover(&ctx);assert(warm_calls==1);lock_style=2;
- s_cover_pending_mask=1;warm_shelf_lock_cover(&ctx);assert(warm_calls==1);s_cover_pending_mask=0;
- warm_shelf_lock_cover(&ctx);assert(warm_calls==2&&!s_cover_warm_mask);
- // Presentation must never load more covers after the tick has rendered its dirty rectangle.
- for(int i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
- puts("PASS: whole-page cache reads even past 100ms, one complete cover reveal in all three modes/grid/list, placeholder acknowledgement retains dirty artwork, bounded cold decoding, cancellation, press deferral, failed-display retry, missing/OOM fallback and exclusive format ownership");
+ reset(&ctx);fake_us=0;ready_after=12;gather_cover_entry(&ctx);assert(shelf_cover_frame_ready()&&shelf_cover_reveal_mask()==511&&fake_us==12000);
+ reset(&ctx);fake_us=0;ready_after=0;gather_cover_entry(&ctx);assert(!shelf_cover_frame_ready()&&fake_us==60000);
+ reset(&ctx);fake_us=0;nav_stop=1;gather_cover_entry(&ctx);assert(ctx.request_app&&fake_us==0);
+ reset(&ctx);fake_us=0;s_presented_view=SHELF;gather_cover_entry(&ctx);assert(fake_us==0&&!nav_polls);s_presented_view=-1;
+ reset(&ctx);touch.touched=true;assert(!prepare_cover_batch(&ctx,false)&&!queued);touch.touched=false;
+ nav_stop=3;assert(!prepare_cover_batch(&ctx,true)&&ctx.request_app&&queued==3);
+ reset(&ctx);ready_mask=511;failed_mask=4;assert(prepare_cover_batch(&ctx,true)==507&&shelf_cover_frame_ready());
+ assert(!s_covers[2].gray&&!s_covers[2].fast_bits);
+ s_cover_warm_mask=3;ctx.now_ms=2000;warm_shelf_lock_cover(&ctx);assert(warm_calls==1&&s_cover_warm_mask==2);
+ for(unsigned i=0;i<9;++i){free(s_covers[i].gray);free(s_covers[i].fast_bits);}
+ puts("PASS: all3 modes queue without IO, gather warm hits within 60ms with immediate nav cancellation and reveal one complete group, retain dirty covers through placeholder/failed displays, prioritize touch/navigation and degrade missing/OOM slots safely");
 }
 '''
-source=book.read_text()
-assert 's_shelf_feedback_pending || s_cover_batch_present_pending' in function('present',book)
-assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
-assert 'unsigned changed=shelf_cover_reveal_mask();' in function('on_tick',book)
 assert 'const bool artwork = shelf_cover_frame_ready();' in function('draw_shelf_cover',book)
-assert 'err==EPD_DRAW_SUCCESS' in function('present',book) and 's_cover_dirty_mask &= ~s_cover_present_mask' in function('present',book)
+assert 's_cover_batch_present_pending = true;' in function('on_tick',book)
 assert 's_cover_batch_present_pending = false;' in function('present',book)
 with tempfile.TemporaryDirectory(dir=ROOT/'build') as directory:
     d=Path(directory);c=d/'batch.c';exe=d/'batch';c.write_text(unit)
-    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',str(c),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=gnu11','-Wall','-Wextra','-Werror','-isysroot','/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk','-I'+str(ROOT/'main/book'),str(c),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

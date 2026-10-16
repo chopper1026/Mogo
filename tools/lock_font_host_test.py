@@ -51,6 +51,7 @@ static int ttf_font_open(const char *path){++opens;if(!strcmp(path,missing)||!st
 static int ttf_font_open_builtin(void){return ttf_font_open("builtin");}
 static void ui_text_set_system_font(bool on){system_face=on;}
 static void ui_text_set_system_scale(bool on){system_scale=on;}
+static void ui_nav_status_font_context(bool reading,bool changed){(void)changed;assert(reading==s_reading);}
 '''
 for name in ('font_file', 'system_path', 'activate', 'app_font_activate_system', 'app_font_activate_reading',
              'app_font_retry_active', 'app_font_begin_lock', 'app_font_end_lock'):
@@ -79,18 +80,21 @@ int main(void){
  app_font_end_lock(&saved);assert(s_reading&&!system_face&&!system_scale);
  missing[0]=chosen[0]=0;app_font_begin_lock(&saved);assert(ttf_font_is_builtin()&&!system_face&&system_scale);
  app_font_end_lock(&saved);assert(s_reading&&!system_scale);
- // Imported reading face disappears while already active: fallback once and remain stable.
+ // 已装载的字体从卡上消失：重试不碰卡也不换内建，多次重试保持稳定。/ A face already loaded when its card file disappears: the retry never touches the card or swaps to built-in, and repeats stay stable.
  strcpy(reader,"/fonts/reader.ttf");missing[0]=0;app_font_activate_reading();strcpy(missing,reader);
+ before=opens;assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,reader)&&opens==before);
+ for(int i=0;i<100;++i)assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,reader)&&opens==before);
+ missing[0]=0;assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,reader)&&opens==before);strcpy(corrupt,reader);active[0]=0;
+ // 未装载时重试仍会校验：打开失败回退内建并记住拒绝，清掉拒绝后重新装载。/ With nothing loaded the retry validates again: a failed open falls back to built-in and is remembered; clearing it reloads.
  assert(app_font_retry_active()&&ttf_font_is_builtin());before=opens;
  for(int i=0;i<100;++i)assert(!app_font_retry_active()&&opens==before);
- missing[0]=0;assert(app_font_retry_active());strcpy(corrupt,reader);active[0]=0;
- assert(app_font_retry_active()&&ttf_font_is_builtin());before=opens;
- for(int i=0;i<100;++i)assert(!app_font_retry_active()&&opens==before);
- corrupt[0]=0;s_rejected[0]=0;assert(app_font_retry_active());
+ corrupt[0]=0;s_rejected[0]=0;assert(app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,reader));
+ // 系统字体同样不因卡读失败换内建；保存的选择不被覆盖。/ The system face is not swapped to built-in by a card read failure either; saved choices stay untouched.
  strcpy(chosen,"/fonts/system.ttf");app_font_activate_system();strcpy(missing,chosen);
- assert(app_font_retry_active()&&ttf_font_is_builtin());before=opens;
- for(int i=0;i<100;++i)assert(!app_font_retry_active()&&opens==before);
+ before=opens;assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,chosen)&&opens==before);
+ for(int i=0;i<100;++i)assert(!app_font_retry_active()&&!ttf_font_is_builtin()&&!strcmp(active,chosen)&&opens==before);
  missing[0]=0;
+ assert(!strcmp(chosen,"/fonts/system.ttf")&&!strcmp(reader,"/fonts/reader.ttf"));
  strcpy(chosen,"/fonts/system.ttf");recovery=true;
  app_font_begin_lock(&saved);assert(ttf_font_is_builtin()&&!system_face);app_font_end_lock(&saved);
  app_font_begin_lock(NULL);app_font_end_lock(NULL);

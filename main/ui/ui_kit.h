@@ -295,6 +295,10 @@ int ui_datamatrix_side(const char* text);
 void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text);
 
 void ui_clear_page(uint8_t* framebuffer);
+/// Exact logical fill using contiguous packed rows; preserves boundary nibbles.
+void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *framebuffer);
+/// 直接写入已裁剪的一位位图，源数据按行、低位在先；不缩放、不申请内存。/ Blit a clipped row-major, least-bit-first mono bitmap directly, without rescaling or allocation.
+void ui_blit_mono_bitmap(uint8_t *framebuffer, EpdRect rect, const uint8_t *bits, size_t stride);
 /// 把逻辑矩形换算成 framebuffer 里的物理矩形。
 /// Map a logical rect to the physical rect in the framebuffer.
 EpdRect ui_rotate_rect_to_fb(EpdRect rect);

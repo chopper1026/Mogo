@@ -33,13 +33,28 @@ static size_t skip_image_spacing(size_t off){return off;}
 static const blk_t *block_at(size_t off){return off==0?&block:NULL;}
 int book_layout_page_image(size_t page){(void)page;return -1;}
 int book_layout_page_image_count(size_t page){(void)page;return s_page_img_start[1]-s_page_img_start[0];}
-static bool take_line(size_t off,size_t *next,bool *end,int *px,bool *heading,int *width,int *indent,uint8_t *align,int *before,int *after){
+static bool take_line(size_t off,int advance_limit,int hang_margin,size_t *next,bool *end,int *px,bool *heading,int *width,int *indent,uint8_t *align,int *before,int *after){
+ (void)advance_limit;(void)hang_margin;
  assert(off==4);strcpy(s_line,"tail");*next=8;*end=true;*px=10;*heading=false;*width=40;*indent=0;*align=0;*before=*after=0;return true;
 }
 static int line_height_for(int px){return px;}
 static int gap_for(int height,bool heading){(void)height;(void)heading;return 0;}
 static int ttf_ascender_px(int px){return px;}
-int test_guide_segments,test_guide_first_y,test_guide_height;
+// rc93 竖排与按段换字体的状态；横排回归里竖排恒关、run 表恒空。
+// rc93 vertical and per-run state; this horizontal regression keeps vertical off and runs empty.
+static bool s_vertical;
+static uint32_t s_generation;
+static book_layout_draw_cursor_t *s_idle_draw;
+#define LINE_RUN_MAX 64u
+typedef struct {uint32_t offset;uint8_t slot;} ttf_run_t;
+static ttf_run_t s_line_runs[LINE_RUN_MAX];
+static size_t s_line_run_count;
+#define TTF_FONT_SLOT_SYSTEM 0
+static void slot_select_for(size_t off){(void)off;}
+static void ttf_draw_set_runs(const ttf_run_t *runs,size_t count){(void)runs;(void)count;}
+static int ttf_font_select(int slot){(void)slot;return 0;}
+static void draw_vertical_page(uint8_t *fb,size_t page,EpdRect rect){(void)fb;(void)page;(void)rect;}
+int test_guide_segments,test_guide_first_x,test_guide_first_y,test_guide_second_y,test_guide_last_y,test_guide_height;
 uint8_t test_guide_gray;
 static void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,int align,int fg,int bg){
  (void)fb;(void)x;(void)px;(void)align;(void)fg;(void)bg;assert(!strcmp(text,"tail"));++painted;baseline=y;

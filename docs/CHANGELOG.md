@@ -5,8 +5,33 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
-- 阅读页眉去掉返回键与收藏图标：书名移到左侧，右侧改为状态栏同款的时间与电池，翻页正文位置不变。三键自定义新增「返回」动作，按进入阅读的来路回退（首页最近阅读回首页，书架回书架，默认键位不变），整本收藏的开关移到书架长按「图书详情」，收藏置顶与封面角标保持原有行为。
-  The reader header drops its back and favorite controls: the title moves left and the right side shows the status-bar clock and battery, with the body position unchanged. Key actions gain "back", which undoes the entry into reading (home recent-reading returns home, the shelf returns to the shelf; defaults untouched), and the whole-book favorite toggle now lives in the shelf details panel while favorite-first sorting and cover badges keep working.
+- 阅读页眉去掉返回键与收藏图标：书名移到左侧，右侧改为状态栏同款的时间与电池，翻页正文位置不变。「返回主页」按键按进入阅读的来路回退（首页最近阅读回首页，书架回书架，默认键位不变），整本收藏的开关移到书架长按「图书详情」，收藏置顶与封面角标保持原有行为。
+  The reader header drops its back and favorite controls: the title moves left and the right side shows the status-bar clock and battery, with the body position unchanged. The "home" key returns along the entry path (home recent-reading goes home, the shelf returns to the shelf; defaults untouched), and the whole-book favorite toggle now lives in the shelf details panel while favorite-first sorting and cover badges keep working.
+- 接入 PR #34：修正竖排阅读辅助线的位置和虚线节奏，补齐横线类符号旋转，并按字体原生全角步进对齐章节数字编号。
+  Integrate PR #34 for vertical reading-guide placement and dash phase, dash-like punctuation rotation and chapter-number alignment using native fullwidth metrics.
+- 接入 PR #32：RTC 轨迹记录开机各阶段耗时；首帧后停止开机标记，普通回首页不挤占记录。保留后台封面缓存加载。
+  Integrate PR #32 boot-phase RTC timing, stopping boot marks after the first frame and retaining background cover loading.
+- 接入 PR #33：设置 → 升级和恢复 → 屏幕修复，手动执行面板黑白恢复与当前页面整屏重建；结果提示随最终画面一次显示，输出失败保留恢复路径。正常阅读波形、底栏边界和分段滑动不变。
+  Integrate PR #33 manual panel repair in Settings → Upgrade and recovery, restoring the complete current page with its final notice once and retaining output-failure recovery. Normal reading waveforms, navigation bounds and discrete scrolling remain unchanged.
+
+## 0.3.3-rc93 / 2026-10-15
+
+- 优先优化连续翻页：下一页预绘与当前页推屏重叠，连按复用已准备内容，未完成的目标接着绘制。保留正式 rc92 的阅读波形、插图、水波纹和周期清残影规则。
+  Prioritize rapid turns with output-overlapped prefetch and partial-target reuse; retain rc92 reading waveforms, images, ripple and periodic cleanup.
+- 首页和书架封面使用有界后台任务，优先复用 TF 成品缓存；过期结果按代次丢弃，书架整组显示。普通亚克力书架题头与内容合并为同一轮校准灰阶输出，固定底栏保持。
+  Prepare covers in bounded background jobs, reuse processed TF caches, reject stale results and reveal shelf groups. Ordinary acrylic headers/content share one calibrated gray scan with fixed navigation.
+- 拼贴锁屏复用小型书库索引，长章节行缓冲按实际文字增长，减少重复扫描与内存峰值；保留锁屏画质和低内存回退。
+  Reuse a small collage catalogue and grow line scratch on demand, retaining artwork quality and low-memory fallbacks.
+- 首页继续阅读整块可点，并增加封面反馈；「返回主页」按开书来源回首页或原书架分类页。资料卡头像后台准备，不再阻挡首页与设置操作。
+  Make the entire continue card actionable with cover feedback, return to the opening's Home/shelf origin and prepare avatars without blocking page input.
+- 改进 S3 RTC 计时，已联网每小时校准，离线空闲每六小时短连已保存 Wi-Fi 对时；休眠和其他网络操作可取消后台对时。
+  Improve RTC timekeeping with hourly online and six-hour idle offline calibration; background sync yields to sleep and other network operations.
+- 增大底栏触控范围并在首次接触时响应，优化普通主页切换、底栏边界和状态签名显示。三种主页模式的设置列表恢复分段滑动，取消此前跟手与惯性方案。
+  Expand root-tab targets and respond on initial contact, refine ordinary transitions, navigation boundaries and status signatures. Restore discrete settings swipes in all main modes, removing follow/inertial scrolling.
+- 底部上滑固定打开阅读工具栏，取消按键必须映射工具栏的限制；首行缩进控件增加字号与间距，返回字体设置统一黑底白字。
+  Keep bottom-edge Tools independent of key mappings, enlarge and separate indent controls and use the matching dark return button.
+- 官网网页刷机、TF、联网 OTA 与 Release 附件来自同一次正式构建；保留旧版本固定下载地址。
+  Publish one build across web, TF, OTA and Release assets while retaining immutable older downloads.
 
 ## 0.3.3-rc92 / 2026-10-14
 

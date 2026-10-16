@@ -8,6 +8,11 @@ typedef enum {
     UI_HOME_CLOCK_PS1995, UI_HOME_CLOCK_ASTERISK,
     UI_HOME_CLOCK_MOON, UI_HOME_CLOCK_KEHAI, UI_HOME_CLOCK_DALI, UI_HOME_CLOCK_CAT, UI_HOME_CLOCK_HOUSE, UI_HOME_CLOCK_COUNT
 } ui_home_clock_style_t;
+// 可选的调用方缓冲保存两张小尺寸表盘底图，以分钟为键，不缓存另一份字体。
+// Optional caller-owned scratch holds two small, minute-keyed base rasters, without another font.
+#define UI_HOME_CLOCK_BASE_CACHE_BYTES (2u*UI_HOME_WIDGET_W*UI_HOME_WIDGET_H/2u)
+/// 在绘制外绑定缓冲；绘制过程不分配内存、不读文件。/ Bind outside drawing; rendering never allocates or reads files.
+void ui_home_clock_bind_base_cache(uint8_t *memory,size_t bytes);
 const char *ui_home_clock_name(ui_home_clock_style_t style);
 void ui_home_clock_style_draw(uint8_t *fb,EpdRect bounds,const struct tm *date,bool binary,ui_home_clock_style_t style);
 /// 秒针旧/新位置的有界区域，用于恢复磨砂底色并局部移动圆点。/ Bounded old/new second positions for local frosted-background restoration.

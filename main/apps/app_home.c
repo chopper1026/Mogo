@@ -288,7 +288,7 @@ static void draw_header_mark(uint8_t* fb, const home_layout_t* L) {
         ui_text_vc(fb, cx, cy, UI_PX_TITLE, "P", EPD_DRAW_ALIGN_CENTER, false);
         return;
     }
-    epd_fill_rect(acc, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast(acc, UI_GRAY_BLACK, fb);
     ui_text_vc(fb, cx, cy, UI_PX_TITLE, "P", EPD_DRAW_ALIGN_CENTER, true);
 }
 

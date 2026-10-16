@@ -2721,6 +2721,15 @@ static bool vertical_rotated_cp(uint32_t cp) {
         case 0xff08: case 0xff09: case 0xff3b: case 0xff3d: case 0xff5b: case 0xff5d:
         case 0xff5f: case 0xff60: case 0xff62: case 0xff63: case 0xff0d: case 0xff5e:
             return true;
+        // 形如短横的符号：负号、长音符与半角长音符、小号破折号与连字符、两三个全身宽的破折号。
+        // 它们在竖排里要立起来；留在横排方向的话，读者看到的是一道跟正文走向垂直的短线。
+        // Dash-like marks: the minus sign, the prolonged sound marks, the small dash and hyphen forms
+        // and the two/three-em dashes. They have to stand up in vertical setting; left horizontal they
+        // read as a short stroke across the column.
+        case 0x2212: case 0x2e3a: case 0x2e3b:
+        case 0x30fc: case 0xff70:
+        case 0xfe58: case 0xfe63:
+            return true;
         default: return false;
     }
 }
@@ -2877,10 +2886,25 @@ int ttf_draw_text_px_vertical(
     pixel_height = clamp_px(pixel_height);
     warm_runs(pixel_height, text);
     const int baseline = ttf_ascender_px(pixel_height);
+    // 字身框取字体自己的全角步进，而不是请求的字号：这个字体在给定 px 下全角只走约 0.69 em，
+    // 拿 px 当框会把半角数字往右推四分之一个字，题头编号就和汉字不在一条竖轴上。
+    // The cell is the font's own fullwidth advance, not the requested pixel size: this face advances
+    // about 0.69 em at a given px, so centring on px pushed halfwidth digits a quarter of a cell to
+    // the right and a chapter number came off the ideographs' axis.
+    const glyph_entry_t* fullwidth = get_glyph(0x4e00, pixel_height);
+    const int cell_px = fullwidth != NULL && fullwidth->advance_x > 0 ? fullwidth->advance_x : pixel_height;
     int cell = 0;
     const char* cursor = text;
     uint32_t previous_cp = 0;
     bool digit_run_rotates = false;
+    // 半角数字的整串居中量。每个数字各自按整个字身框居中、却只前进半格，两位就会整体右移
+    // 四分之一个字，三位更多——题头的编号因此和汉字列错开。这里改成整串一起量、一起居中。
+    // Centering offset for a run of halfwidth digits. Centering each digit across the whole em box
+    // while advancing only half a cell walks a two-digit number a quarter of a cell to the right and a
+    // three-digit one further, which leaves a chapter number out of line with its neighbours. The run
+    // is measured and centered as a whole instead.
+    int run_dx = 0;
+    bool in_centered_run = false;
     while (*cursor != '\0') {
         run_apply((size_t)(cursor - text));
         uint32_t cp = decode_utf8(&cursor);
@@ -2894,19 +2918,38 @@ int ttf_draw_text_px_vertical(
             rotate = digit_run_rotates;
         }
         previous_cp = cp;
+        const bool centered = !rotate && vertical_centered_cp(draw_cp) && glyph->width > 0;
+        if (centered && !in_centered_run) {
+            // 量这一串的墨迹范围：竖排里每个字都落在同一个 x 上，前进只在 y 方向，所以横向范围
+            // 就是各字身框的并集——把前进量算进去会把框量歪，整串随之偏移。
+            // Measure this run's ink box: in a vertical column every glyph shares one x and the advance
+            // only moves down the column, so the horizontal extent is the union of the glyph boxes.
+            // Counting the advance in would mis-measure the box and shift the whole run.
+            in_centered_run = true;
+            int ink_left = glyph->left;
+            int ink_right = glyph->left + glyph->width;
+            const char* scan = cursor;
+            while (*scan != '\0') {
+                uint32_t next_cp = decode_utf8(&scan);
+                const glyph_entry_t* next = get_glyph(next_cp, pixel_height);
+                if (next == NULL || next->width <= 0 || !vertical_centered_cp(next_cp)) break;
+                if (next->left < ink_left) ink_left = next->left;
+                if (next->left + next->width > ink_right) ink_right = next->left + next->width;
+            }
+            run_dx = (cell_px - (ink_right - ink_left)) / 2 - ink_left;
+        } else if (!centered) in_centered_run = false;
         if (cp != ' ' && cp != '\t') {
             if (rotate) {
                 blit_rotated(framebuffer, x, y, cell, pixel_height, baseline, glyph, fg, bg);
             } else {
-                // 全角句读抬到字格右上角；半角字形（数字、西文标点）在字身框里水平居中，
+                // 全角句读抬到字格右上角；半角字形（数字、西文标点）按整串在字身框里水平居中，
                 // 否则整串会贴着左边，看起来和汉字错开半格。
                 // Fullwidth stops lift into the cell's top-right corner; halfwidth glyphs (digits,
-                // Western punctuation) center across the em box, otherwise a run hugs the left
-                // edge and looks half a cell off against the ideographs.
+                // Western punctuation) center across the em box as a whole run, otherwise a run hugs
+                // the left edge and looks half a cell off against the ideographs.
                 int dx = 0, dy = 0;
-                if (vertical_corner_cp(cp)) { dx = pixel_height / 2; dy = -pixel_height / 2; }
-                else if (vertical_centered_cp(draw_cp) && glyph->width > 0)
-                    dx = (pixel_height - glyph->width) / 2 - glyph->left;
+                if (vertical_corner_cp(cp)) { dx = cell_px / 2; dy = -cell_px / 2; }
+                else if (centered) dx = run_dx;
                 blit_upright(framebuffer, x + dx, y + cell + baseline + dy, glyph, fg, bg);
             }
         }

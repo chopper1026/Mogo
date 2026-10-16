@@ -83,6 +83,9 @@ typedef struct {
     uint32_t width, height, source_w, source_h, rotation, bytes;
 } lock_cache_t;
 typedef struct { float x, y, w; unsigned index; } lock_placement_t;
+static lock_library_t *s_library_index;
+static unsigned s_library_revision,s_library_root_count;
+void book_lock_collage_invalidate(void) { free(s_library_index);s_library_index=NULL; }
 static const uint8_t *s_pending_frame;
 static lock_cache_t s_pending_cache;
 
@@ -212,20 +215,56 @@ static bool backfill_book(const char *path, const book_progress_t *progress, voi
         collect_book(library, path, &st, progress);
     return true;
 }
+// 只保留最近十五本及根内总数；阅读进度变化从NVS合并，目录结构变化才重新遍历TF。
+// Retain only the top15 and root count; merge progress from NVS and rescan TF only after structural changes.
+static bool index_progress(const char *path,const book_progress_t *progress,void *opaque) {
+    lock_library_t *library=opaque;struct stat st;
+    if(stat(path,&st)||st.st_size<0||(uint64_t)st.st_size!=progress->file_size||!S_ISREG(st.st_mode)||hidden_book(library->hidden,path))return true;
+    bool inside=false,duplicate=false;
+    for(int i=0;i<library->roots_count;++i){size_t n=strlen(library->roots[i].path);if(!strncmp(path,library->roots[i].path,n)&&path[n]=='/')inside=true;}
+    for(unsigned i=0;i<library->used;++i)if(!strcmp(path,library->books[i].path))duplicate=true;
+    unsigned count=library->count;
+    if(!duplicate)collect_book(library,path,&st,progress);
+    library->count=inside?count:count<UINT_MAX?count+1:count;
+    return true;
+}
+static bool index_restore(lock_library_t *library) {
+    if(!s_library_index||s_library_revision!=book_store_revision()||!library->cache_complete||
+       library->roots_count!=s_library_index->roots_count)return false;
+    for(int i=0;i<library->roots_count;++i)
+        if(strcmp(library->roots[i].path,s_library_index->roots[i].path))return false;
+    for(unsigned i=0;i<s_library_index->used;++i){
+        lock_book_t *old=&s_library_index->books[i];struct stat st;book_progress_t progress={0};
+        if(stat(old->path,&st)||!S_ISREG(st.st_mode)||hidden_book(library->hidden,old->path))return false;
+        bool saved=st.st_size>=0&&(uint64_t)st.st_size<=UINT32_MAX&&book_progress_load(old->path,(uint32_t)st.st_size,&progress);
+        // 清进度可能让此前未进入前十五的书补位，必须重新扫描保证顺序。
+        // Clearing progress can promote an uncached book; rescan to preserve exact ranking.
+        if(old->recent&&(!saved||progress.last_open_s<old->recent))return false;
+        collect_book(library,old->path,&st,saved?&progress:NULL);
+    }
+    library->count=s_library_root_count;
+    return book_progress_list(index_progress,library)==ESP_OK;
+}
 static lock_library_t *library_load(void) {
-    lock_library_t *library = lock_alloc(sizeof(*library));
-    if (!library) return NULL;
-    library->cache_complete = true;
-    library->font_path = ttf_font_path();
-    library->font_stat_valid = !stat(library->font_path, &library->font_stat);
-    library->font_weight = ttf_get_weight();
-    (void)nvs_open("rp_shelf", NVS_READONLY, &library->hidden);
-    (void)book_store_roots(library->roots, &library->roots_count);
-    if (book_store_roots_degraded()) library->cache_complete = false;
-    for (int i = 0; i < library->roots_count; ++i) scan_root(library, library->roots[i].path);
-    if (book_progress_list(backfill_book, library) != ESP_OK) library->cache_complete = false;
-    if (library->hidden) nvs_close(library->hidden);
-    library->hidden = 0;
+    lock_library_t *library=lock_alloc(sizeof(*library));if(!library)return NULL;
+    library->cache_complete=true;library->font_path=ttf_font_path();
+    library->font_stat_valid=!stat(library->font_path,&library->font_stat);library->font_weight=ttf_get_weight();
+    (void)nvs_open("rp_shelf",NVS_READONLY,&library->hidden);
+    (void)book_store_roots(library->roots,&library->roots_count);
+    if(book_store_roots_degraded())library->cache_complete=false;
+    unsigned root_count=s_library_root_count;
+    if(!index_restore(library)){
+        library->count=library->used=0;
+        for(int i=0;i<library->roots_count;++i)scan_root(library,library->roots[i].path);
+        root_count=library->count;
+        if(book_progress_list(backfill_book,library)!=ESP_OK)library->cache_complete=false;
+    }
+    if(library->hidden)nvs_close(library->hidden);
+    library->hidden=0;
+    if(library->cache_complete){
+        if(!s_library_index)s_library_index=lock_alloc(sizeof(*s_library_index));
+        if(s_library_index){*s_library_index=*library;s_library_revision=book_store_revision();s_library_root_count=root_count;}
+    }else book_lock_collage_invalidate();
     return library;
 }
 static bool cache_directory(void) {

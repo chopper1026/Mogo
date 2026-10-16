@@ -24,7 +24,7 @@ void heap_caps_free(void*);
 size_t heap_caps_get_free_size(int);
 size_t heap_caps_get_largest_free_block(int);
 ''')
- (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text().replace('int64_t now_ms;', 'int64_t now_ms; uint8_t *fb; int leaf;'))
+ (p/'app.h').write_text((ROOT/'tools/ui_gesture_stubs/app.h').read_text().replace('int64_t now_ms;', 'int64_t now_ms; int leaf;'))
  epd=(ROOT/'tools/ui_gesture_stubs/epdiy.h').read_text()+'\nvoid epd_fill_circle(int,int,int,uint8_t,uint8_t*);\n'
  (p/'epdiy.h').write_text(epd)
  builtin=(ROOT/'main/assets/builtin.ttf').read_bytes()
@@ -60,7 +60,7 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle','epd_write_line','epd_draw_line'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
- for n in ('clamp_radius','draw_arc','ui_draw_round_rect','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
+ for n in ('ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_blit_mono_bitmap','clamp_radius','draw_arc','ui_draw_round_rect','ui_fill_round_rect','ui_inset_rect','ui_draw_control_frame','ui_draw_separator'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=function('pixel',ROOT/'main/ui/ui_pinpad.c')+'\n'
  unit+='typedef struct {unsigned x,y,width,height;} book_crop_t;\n'
  unit+=function('book_cover_crop',ROOT/'main/book/book_cover.c')+'\n'
@@ -77,6 +77,7 @@ static unsigned s_cover_pending_mask;
 #define SHELF_BOOK_LIFT_PX 16
 #define SHELF_LIST_BOUNCE_PX 8
 #define SHELF_FAST_COVER_STRIDE 21
+#define SHELF_FAST_COVER_WIDTH 164
 static struct {uint8_t *gray,*fast_bits;unsigned width,height;bool fast_white_edge;} s_covers[4];
 typedef struct {char name[256],author[128];bool has_progress,favorite;unsigned pct;} shelf_entry_t;
 static shelf_entry_t *s_shelf;
@@ -110,11 +111,11 @@ int main(int argc,char **argv){
  ui_text_fixed_vc(fb,36,122,52,"书架",EPD_DRAW_ALIGN_LEFT,false);
  ui_fill_round_rect(fb,(EpdRect){442,94,97,54},18,255);ui_draw_round_rect(fb,(EpdRect){442,94,97,54},18,0x70);ui_text_fixed_vc(fb,490,121,20,"管理",EPD_DRAW_ALIGN_CENTER,false);
  ui_fill_round_rect(fb,(EpdRect){551,94,97,54},18,255);ui_draw_round_rect(fb,(EpdRect){551,94,97,54},18,0x70);ui_text_fixed_vc(fb,599,121,20,"+ 导入",EPD_DRAW_ALIGN_CENTER,false);
- epd_fill_rect((EpdRect){36,195,612,2},0x60,fb);ui_fill_round_rect(fb,(EpdRect){36,216,612,788},20,255);ui_draw_control_frame(fb,(EpdRect){36,216,612,788},20,0x50);
+ epd_fill_rect((EpdRect){36,195,612,2},0x60,fb);ui_fill_round_rect(fb,(EpdRect){36,184,612,788},20,255);ui_draw_control_frame(fb,(EpdRect){36,184,612,788},20,0x50);
  shelf_entry_t items[4]={{"我与地坛","史铁生",true,true,42},{"十八岁出门远行","余华",true,false,18},{"夏天、烟火和我的尸体","乙一",false,true,0},{"活山","娜恩 · 谢泼德",true,false,100}};
  s_shelf=items;app_ctx_t ctx={.fb=fb};
  for(int i=0;i<4;++i){char path[1024];snprintf(path,sizeof(path),"%s/%d.raw",argv[2],i);FILE *f=fopen(path,"rb");assert(f);assert(fread(&s_covers[i].width,4,1,f)==1&&fread(&s_covers[i].height,4,1,f)==1);unsigned bytes=s_covers[i].width*s_covers[i].height;assert(bytes<=176*240);s_covers[i].gray=malloc(bytes);assert(s_covers[i].gray&&fread(s_covers[i].gray,1,bytes,f)==bytes);fclose(f);
- EpdRect r=shelf_cover_image(i);assert(r.x>=64&&r.x+r.width<=198&&r.y>=216+i*197&&r.y+r.height<=216+(i+1)*197);
+ EpdRect r=shelf_cover_image(i);assert(r.x>=64&&r.x+r.width<=198&&r.y>=184+i*197&&r.y+r.height<=184+(i+1)*197);
  assert(r.x==71&&r.width==120&&r.height==156);
  book_crop_t crop=book_cover_crop(s_covers[i].width,s_covers[i].height,r.width,r.height);
  assert(crop.width&&crop.height&&crop.x+crop.width<=s_covers[i].width&&crop.y+crop.height<=s_covers[i].height);
@@ -125,7 +126,7 @@ int main(int argc,char **argv){
  uint8_t *before=malloc(684*1216/2);assert(before);memcpy(before,fb,684*1216/2);
  s_pressed_control=i;EpdRect area=paint_list_cover_feedback(&ctx,i);
  assert(area.x==r.x&&area.y==r.y-8&&area.width==r.width&&area.height==r.height+8);
- assert(area.y>=216+i*197&&area.y+area.height<216+(i+1)*197);
+ assert(area.y>=184+i*197&&area.y+area.height<184+(i+1)*197);
  assert(((area.y&3)==(r.y&3)));
  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)
   if(x<area.x||x>=area.x+area.width||y<area.y||y>=area.y+area.height)
@@ -133,7 +134,7 @@ int main(int argc,char **argv){
  assert(pixel(fb,r.x+20,r.y+r.height-1)==240);
  s_pressed_control=-1;paint_list_cover_feedback(&ctx,i);assert(!memcmp(before,fb,684*1216/2));
  free(before);free(s_covers[i].gray);}
- for(int row=0;row<3;++row)for(int yy=0;yy<2;++yy)assert(pixel(fb,300,216+row*197+196+yy)<128);
+ for(int row=0;row<3;++row)for(int yy=0;yy<2;++yy)assert(pixel(fb,300,184+row*197+196+yy)<128);
  assert(pixel(fb,36,260)<128&&pixel(fb,37,260)<128&&pixel(fb,38,260)>=240);
  ui_text_fixed_vc(fb,342,1060,17,"15本书 · 01/04",EPD_DRAW_ALIGN_CENTER,false);
  ui_text_fixed_vc(fb,226,1060,22,"<",EPD_DRAW_ALIGN_CENTER,false);ui_text_fixed_vc(fb,458,1060,22,">",EPD_DRAW_ALIGN_CENTER,false);

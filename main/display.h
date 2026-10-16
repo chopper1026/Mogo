@@ -48,20 +48,14 @@ void display_set_bulk_io(bool active);
 
 /// 请求下一张完成绘制的画面整屏清理一次，用于解锁。/ Clean the next completed frame once after unlock.
 void display_request_full_refresh(void);
-/// 列表逐帧跟随；复用已有连续DU状态，不另分配整屏缓存。/ Follow a list one phase at a time using the existing continuous-DU state.
-enum EpdDrawError display_follow_area(EpdiyHighlevelState* hl, EpdRect area, bool changed, bool continuous);
-bool display_follow_busy(void);
-/// 完成黑白相位后，仅补变化灰阶；快刷可直接保留黑白，不扫描。/ After binary phases complete, restore changed grays only, or retain binary without scanning.
-enum EpdDrawError display_follow_settle(EpdiyHighlevelState* hl, EpdRect area, bool restore_gray);
-
 enum EpdDrawError update_display_mode(EpdiyHighlevelState* hl, enum EpdDrawMode mode);
 /// 普通页面切换使用真实差分 GL16；未变化像素不进入 dirty map。
 /// True differential GL16 for ordinary page transitions; unchanged pixels stay clean.
 enum EpdDrawError update_display_mode_diff(EpdiyHighlevelState* hl, enum EpdDrawMode mode);
-/// 系统页切换：16 灰阶差分 GL16，间隔性全像素灰阶整理，累计若干次同步做 GC16；不安排延迟二次刷新。
-/// System page transition: 16-gray differential GL16 with periodic full-pixel gray settling and synchronous GC16 cleanup.
+/// 系统页切换：普通模式柔和16灰阶差分，等灰保持、黑白端点单向推动，周期GC16清残影；不安排二次刷新。
+/// System transitions: ordinary soft 16-gray differences hold equal grays and drive BW endpoints directionally, with periodic GC16 cleanup and no second pass.
 /// 四主页面固定底栏，仅横条局部更新；普通保留灰阶与内容区整理，快刷用完整黑白表及棋盘格亚克力。
-/// All main screens retain navigation with local marker updates; ordinary retains grays and body settling, fast uses complete monochrome and checkerboard acrylic.
+/// All main screens retain navigation with local markers; ordinary uses soft gray differences and periodic body cleanup, fast uses monochrome/checkerboard acrylic.
 enum EpdDrawError update_display_fast_page(EpdiyHighlevelState* hl);
 /// 为下一次主页面输出启用固定底栏；标记书架切出与真正切页，避免同页重绘播放动画。
 /// Arm fixed navigation for the next main-screen output; tag shelf exit and actual navigation so same-page repaints do not animate.
@@ -84,6 +78,12 @@ enum EpdDrawError update_display_from_white_with(
 /// Paint the front buffer white and GC16 the panel back to white.
 enum EpdDrawError update_display_white(EpdiyHighlevelState* hl);
 enum EpdDrawError update_display_full(EpdiyHighlevelState* hl);
+
+/// 面板修复：不看 framebuffer 的整屏盲刷，专治刷新中途断电留下的条纹。
+/// Panel repair: a blind full-screen drive that ignores the framebuffer, for the stripes a power
+/// cut in the middle of a refresh leaves behind.
+/// 返回最终整屏输出结果；失败时调用方不能报告成功。/ Return the final full-frame result; callers must not report success on failure.
+enum EpdDrawError display_panel_repair(EpdiyHighlevelState* hl);
 /// 纯文字自动清屏后，用与普通翻页相同的白底文字波形成像。/ After pure-text cleanup, form the target using the ordinary turn's white-to-text waveform.
 enum EpdDrawError update_display_reader_cleanup(EpdiyHighlevelState* hl,const EpdWaveform* text_waveform);
 /// 图片页清除旧光学状态，再驱动完整灰阶。/ Clear the prior optical state and drive the full gray ladder for images.

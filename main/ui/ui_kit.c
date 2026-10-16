@@ -483,21 +483,21 @@ void ui_draw_round_rect(
     const int span_v = rect.height - 2 * r;
 
     if (span_h > 0) {
-        epd_fill_rect(
+        ui_fill_rect_fast(
             (EpdRect){ .x = rect.x + r, .y = rect.y, .width = span_h, .height = 1 },
             color, framebuffer
         );
-        epd_fill_rect(
+        ui_fill_rect_fast(
             (EpdRect){ .x = rect.x + r, .y = y1, .width = span_h, .height = 1 },
             color, framebuffer
         );
     }
     if (span_v > 0) {
-        epd_fill_rect(
+        ui_fill_rect_fast(
             (EpdRect){ .x = rect.x, .y = rect.y + r, .width = 1, .height = span_v },
             color, framebuffer
         );
-        epd_fill_rect(
+        ui_fill_rect_fast(
             (EpdRect){ .x = x1, .y = rect.y + r, .width = 1, .height = span_v },
             color, framebuffer
         );
@@ -530,7 +530,7 @@ void ui_draw_control_frame(uint8_t* framebuffer, EpdRect rect, int radius, uint8
 
 void ui_draw_separator(uint8_t* framebuffer, int y, int x, int width, uint8_t color) {
     if (width <= 0) return;
-    epd_fill_rect((EpdRect){x, y, width, 2}, ui_contrast_gray(color > 0x60 ? 0x60 : color), framebuffer);
+    ui_fill_rect_fast((EpdRect){x, y, width, 2}, ui_contrast_gray(color > 0x60 ? 0x60 : color), framebuffer);
 }
 
 void ui_draw_selected_round_rect(
@@ -564,7 +564,7 @@ void ui_fill_round_rect(
     color = ui_contrast_gray(color);
     radius = clamp_radius(rect, radius);
 
-    epd_fill_rect(
+    ui_fill_rect_fast(
         (EpdRect){
             .x = rect.x + radius,
             .y = rect.y,
@@ -658,7 +658,7 @@ EpdRect ui_content_refresh_area(void) {
 
 void ui_hairline(uint8_t* framebuffer, int y, int x, int w, uint8_t color) {
     color = ui_contrast_gray(color);
-    epd_fill_rect(
+    ui_fill_rect_fast(
         (EpdRect){ .x = x, .y = y, .width = w, .height = 1 }, color, framebuffer
     );
 }
@@ -968,7 +968,7 @@ static void c39_char(
     for (int i = 8; i >= 0; i--) {
         const int w = ((pat >> i) & 1) ? wide : narrow;
         if (((8 - i) & 1) == 0) {
-            epd_fill_rect(
+            ui_fill_rect_fast(
                 (EpdRect){ .x = *x, .y = y, .width = w, .height = h },
                 UI_GRAY_BLACK, framebuffer
             );
@@ -1107,7 +1107,7 @@ static void c128_bars(
         const int on = (pat >> i) & 1;
         if (run > 0 && on != run_on) {
             if (run_on) {
-                epd_fill_rect(
+                ui_fill_rect_fast(
                     (EpdRect){ .x = px, .y = y, .width = run * mod, .height = h },
                     UI_GRAY_BLACK, framebuffer
                 );
@@ -1119,7 +1119,7 @@ static void c128_bars(
         run++;
     }
     if (run > 0 && run_on) {
-        epd_fill_rect(
+        ui_fill_rect_fast(
             (EpdRect){ .x = px, .y = y, .width = run * mod, .height = h },
             UI_GRAY_BLACK, framebuffer
         );
@@ -1331,7 +1331,7 @@ void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text) {
             const int on = (c < dim && mods[r * dim + c]);
             if (on && run0 < 0) run0 = c;
             if (!on && run0 >= 0) {
-                epd_fill_rect(
+                ui_fill_rect_fast(
                     (EpdRect){
                         .x = x0 + run0 * mod,
                         .y = y0 + r * mod,
@@ -1349,6 +1349,59 @@ void ui_draw_datamatrix(uint8_t* framebuffer, EpdRect rect, const char* text) {
 void ui_clear_page(uint8_t* framebuffer) {
 
     memset(framebuffer, 0xFF, (size_t)epd_width() * epd_height() / 2);
+}
+
+void ui_blit_mono_bitmap(uint8_t *fb,EpdRect rect,const uint8_t *bits,size_t stride) {
+    if(!fb||!bits||rect.width<=0||rect.height<=0||stride<((size_t)rect.width+7)/8)return;
+    int64_t right=(int64_t)rect.x+rect.width,bottom=(int64_t)rect.y+rect.height;
+    int x0=rect.x<0?0:rect.x,y0=rect.y<0?0:rect.y;
+    int width=epd_rotated_display_width(),height=epd_rotated_display_height();
+    if(right>width)right=width;
+    if(bottom>height)bottom=height;
+    if(right<=x0||bottom<=y0)return;
+    const int pw=epd_width();
+    int dx=1,dy=pw;
+    switch(epd_get_rotation()) {
+        case EPD_ROT_PORTRAIT:dx=pw;dy=-1;break;
+        case EPD_ROT_INVERTED_LANDSCAPE:dx=-1;dy=-pw;break;
+        case EPD_ROT_INVERTED_PORTRAIT:dx=-pw;dy=1;break;
+        default:break;
+    }
+    EpdRect origin=ui_rotate_rect_to_fb((EpdRect){x0,y0,1,1});
+    int row_pixel=origin.y*pw+origin.x;
+    for(int y=y0;y<bottom;++y,row_pixel+=dy) {
+        const uint8_t *source=bits+(size_t)(y-(int64_t)rect.y)*stride;
+        int pixel=row_pixel;
+        for(int x=x0;x<right;++x,pixel+=dx) {
+            size_t sx=(size_t)(x-(int64_t)rect.x);
+            unsigned shift=(pixel&1)*4,value=source[sx/8]&(1u<<(sx&7))?15:0;
+            fb[pixel/2]=(fb[pixel/2]&~(15u<<shift))|(value<<shift);
+        }
+    }
+}
+
+void ui_fill_rect_fast(EpdRect rect, uint8_t gray, uint8_t *framebuffer) {
+    if (!framebuffer || rect.width <= 0 || rect.height <= 0) return;
+    int64_t right=(int64_t)rect.x+rect.width, bottom=(int64_t)rect.y+rect.height;
+    int width=epd_rotated_display_width(),height=epd_rotated_display_height();
+    if(rect.x<0)rect.x=0;
+    if(rect.y<0)rect.y=0;
+    if(right>width)right=width;
+    if(bottom>height)bottom=height;
+    if(right<=rect.x||bottom<=rect.y)return;
+    rect.width=(int)(right-rect.x);rect.height=(int)(bottom-rect.y);
+    EpdRect physical=ui_rotate_rect_to_fb(rect);
+    const size_t stride=(size_t)epd_width()/2;
+    const uint8_t nibble=gray>>4, packed=nibble*17u;
+    const int start=physical.x,end=physical.x+physical.width;
+    for(int y=physical.y;y<physical.y+physical.height;++y) {
+        uint8_t *row=framebuffer+(size_t)y*stride;
+        int x=start;
+        if(x&1){row[x/2]=(row[x/2]&0x0f)|(nibble<<4);++x;}
+        const int pairs=(end-x)/2;
+        if(pairs>0){memset(row+x/2,packed,(size_t)pairs);x+=pairs*2;}
+        if(x<end)row[x/2]=(row[x/2]&0xf0)|nibble;
+    }
 }
 
 // 旋转都是 90° 的整数倍，逻辑矩形映射过去仍是矩形，所以取两个对角点的包围盒就

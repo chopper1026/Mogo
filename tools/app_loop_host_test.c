@@ -17,6 +17,7 @@ void pico_boot_clear_resume(void) {}
 bool app_book_resume_context(char *p,size_t c,bool *f) { (void)p;(void)c;(void)f;return false; }
 #include "read_pico_transfer.h"
 #include "ble_page_turner.h"
+#include "ui_nav_layout.h"
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
@@ -53,7 +54,7 @@ static bool home_on_touch, home_on_tick, home_on_key, start_second;
 static int home_enters, home_renders, last_menu_leaf, rendered_leaf;
 static const app_desc_t* menu_background;
 static app_desc_t first, second;
-int ui_nav_hit(uint16_t x,uint16_t y){return y>=1108&&x<684?x/171:-1;}
+int ui_nav_hit(uint16_t x,uint16_t y){return y>=UI_NAV_TOUCH_TOP&&y<1216&&x<684?x/171:-1;}
 void ui_nav_request(app_ctx_t *ctx,int index){ctx->request_app=index==0?&first:&second;}
 static bool full_tick, lock_due, font_due, shake_activity;
 static int64_t time_offset, time_step;
@@ -224,6 +225,24 @@ static app_redraw_t nav_return_tick(app_ctx_t* ctx) {
 }
 static app_redraw_t main_late_tick(app_ctx_t* ctx) {(void)ctx;return step == 1 ? response : APP_REDRAW_NONE;}
 int main(void) {
+    // 第一帧报点立即切页，尚未抬手也能响应；同次停留和释放不重复。
+    // The first contact switches before lift; its subsequent hold and release never repeat navigation.
+    for(int policy=0;policy<3;++policy) {
+        reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
+        add(200,UI_NAV_TOUCH_TOP,1,0);run();assert(nav_draws==1&&enters==2&&!touch_calls);
+        reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
+        add(200,1080,1,0);add(232,1092,1,0);add(232,1092,1,0);add(0,0,0,0);run();
+        assert(nav_draws==1&&enters==2&&!touch_calls);
+        reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;
+        add(200,1080,1,0);add(0,0,0,0);add(85,1080,1,0);add(0,0,0,0);run();
+        assert(nav_draws==2&&enters==3&&!touch_calls);
+    }
+    reset();enable_main_tabs();add(85,1080,1,0);add(0,0,0,0);run();assert(!nav_draws&&enters==1);
+    reset();enable_main_tabs();first.on_gesture=gesture;add(200,1080,2,0);add(0,0,0,0);run();assert(!nav_draws);
+    reset();enable_main_tabs();add(200,1080,1,-1);add(0,0,0,0);run();assert(!nav_draws);
+    reset();enable_main_tabs();main_source_visible=false;first.on_gesture=gesture;
+    add(200,1080,1,0);run();assert(!nav_draws&&enters==1);
+    puts("PASS: root tabs act on first contact in all modes, enlarged top edge, one-shot holds, rapid taps, active-tab no-op, subview/multitouch/read-error guards");
     reset();add(10,1141,1,0);
     app_ctx_t loading={.tp=(void*)1};
     assert(app_poll_main_navigation(&loading)&&loading.request_app==&first&&loading.user_activity);
@@ -429,7 +448,7 @@ int main(void) {
         add(85,1141,1,0);add(85,1141,1,0);add(0,0,0,0);run();
         assert(click_presses==1&&click_restores==1&&!click_active&&ticks==1&&du_areas==2&&!gl_areas);
         reset();enable_main_tabs();main_fast=policy==1;main_water=policy==2;click_enabled=true;request_on_touch=true;
-        add(85,1141,1,0);add(0,0,0,0);run();
+        add(200,1141,1,0);add(0,0,0,0);run();
         assert(click_presses==1&&click_restores==1&&!click_active&&du_areas==2&&!gl_areas&&nav_draws==1);
     }
     reset();click_enabled=true;add(85,1141,1,0);add(85,1141,2,0);add(0,0,0,0);run();
@@ -483,6 +502,17 @@ bool pico_online_busy(void) { return online_busy; }
 uint8_t app_settings_auto_lock_minutes(void){return idle_minutes;}
 uint32_t ble_pt_input_serial(void){return 0;}
 
-bool display_follow_busy(void){return false;}
 
 void crash_note_log(void){}
+
+void app_time_service_poll(bool idle) { (void)idle; }
+void app_time_service_cancel(void) {}
+
+// 开机分段计时只写崩溃日志，替身忽略；本页不验证它。/ Boot-phase marks only feed the crash log; the shim ignores them.
+void rp_boot_mark(const char *name) { (void)name; }
+
+void ui_avatar_invalidate(void) {}
+bool book_cover_jobs_quiesce(unsigned timeout){(void)timeout;return true;}
+void book_lock_collage_invalidate(void) {}
+
+bool ble_pt_connected(void) { return false; }

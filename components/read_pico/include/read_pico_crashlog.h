@@ -35,3 +35,10 @@ uint32_t rp_crash_log_serial(void);
 
 /// 清空（用户看过之后）。/ Clear, once the user has seen it.
 void rp_crash_log_clear(void);
+
+/// 记一条开机分段计时，形如 "boot splash 1234ms"（毫秒为开机以来的时间）。
+/// 首帧标记之后忽略调用，普通回首页不会挤掉开机诊断。/ Ignore calls after the first frame; normal Home visits do not evict boot diagnostics.
+/// 这台设备没有随身串口，开机慢在哪一段只能靠这几行说清楚。
+/// Record one boot-phase mark, such as "boot splash 1234ms" (milliseconds since power-on). This
+/// board has no console at hand, and these lines are how a slow boot says which phase it was in.
+void rp_boot_mark(const char *name);

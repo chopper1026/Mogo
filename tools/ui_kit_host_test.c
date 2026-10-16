@@ -41,15 +41,21 @@ void ui_font_measure_line_px(int px, const char *text, int *above, int *below) {
 void ttf_measure_line_px(int px, const char *text, int *above, int *below) {
     (void)text; *above = px * 2 / 3; *below = px / 3;
 }
+// 与真实栅格一致，抗锯齿默认为开；ui_kit 绘制期间临时改写再还原。
+// Default on like the real raster; ui_kit rewrites it for a draw and restores it.
+static bool antialias = true;
+void ttf_set_antialias(bool enabled) { antialias = enabled; }
+bool ttf_get_antialias(void) { return antialias; }
 void ui_font_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                           enum EpdFontFlags align, uint8_t fg, uint8_t bg, bool bw) {
-    (void)fb; (void)x; (void)px; (void)text; (void)align; (void)fg; (void)bg; (void)bw;
-    painted_ttf = false; painted_baseline = baseline;
+    (void)fb; (void)x; (void)text; (void)align; (void)fg; (void)bg; (void)bw;
+    painted_ttf = false; painted_baseline = baseline; painted_px = px;
 }
 void ttf_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                       enum EpdFontFlags align, uint8_t fg, uint8_t bg) {
-    (void)fb; (void)x; (void)px; (void)text; (void)align; (void)fg; (void)bg;
+    (void)fb; (void)x; (void)text; (void)align; (void)fg; (void)bg;
     painted_ttf = true; painted_baseline = baseline;
+    painted_px = px;
     painted_face = active_face;
 }
 void ui_font_draw_title_px(uint8_t *fb, int x, int baseline, int px,
@@ -119,6 +125,9 @@ static void test_native_titles(void) {
 }
 int epd_width(void) { return W; }
 int epd_height(void) { return H; }
+// 测试缓冲为正方形，旋转不改变可用尺寸。/ The test buffer is square, so rotation never changes the usable size.
+int epd_rotated_display_width(void) { return W; }
+int epd_rotated_display_height(void) { return H; }
 enum EpdRotation epd_get_rotation(void) { return rotation; }
 static void physical(int *x, int *y) {
     int ox = *x, oy = *y;
@@ -126,14 +135,28 @@ static void physical(int *x, int *y) {
     else if (rotation == EPD_ROT_INVERTED_LANDSCAPE) { *x = W - ox - 1; *y = H - oy - 1; }
     else if (rotation == EPD_ROT_INVERTED_PORTRAIT) { *x = oy; *y = H - ox - 1; }
 }
+// 面板帧缓冲按 4 位打包：偶数 x 存低半字节，奇数 x 存高半字节，与 epdiy 相同。
+// The panel framebuffer packs 4bpp: even x in the low nibble, odd x in the high nibble, as in epdiy.
+#define FB_STRIDE (W / 2)
+// 读回 4 位灰阶的 8 位字节值（n*17），使原断言的量级保持可读。
+// Read a 4-bit level back as its 8-bit byte value (n*17) so the original assertions stay readable.
+static uint8_t fb_level(const uint8_t *fb, int x, int y) {
+    const uint8_t packed = fb[(size_t)y * FB_STRIDE + x / 2];
+    const uint8_t nibble = (x % 2) ? (uint8_t)(packed >> 4) : (uint8_t)(packed & 0x0f);
+    return (uint8_t)(nibble * 17);
+}
 uint8_t epd_get_pixel(int x, int y, int width, int height, const uint8_t *fb) {
     assert(width == W && height == H && x >= 0 && x < W && y >= 0 && y < H);
-    return fb[y * W + x];
+    const uint8_t packed = fb[(size_t)y * FB_STRIDE + x / 2];
+    return (x % 2) ? (uint8_t)(packed & 0xf0) : (uint8_t)((packed & 0x0f) << 4);
 }
 uint8_t app_settings_system_contrast(void) { return 100; }
 void epd_draw_pixel(int x, int y, uint8_t color, uint8_t *fb) {
     physical(&x, &y);
-    assert(x >= 0 && x < W && y >= 0 && y < H); fb[y * W + x] = color;
+    assert(x >= 0 && x < W && y >= 0 && y < H);
+    uint8_t *cell = &fb[(size_t)y * FB_STRIDE + x / 2];
+    *cell = (x % 2) ? (uint8_t)((*cell & 0x0f) | (color & 0xf0))
+                    : (uint8_t)((*cell & 0xf0) | (color >> 4));
 }
 void epd_fill_rect(EpdRect r, uint8_t color, uint8_t *fb) {
     for (int y = r.y; y < r.y + r.height; ++y)
@@ -153,13 +176,13 @@ static void test_icons(void) {
         for (unsigned s = 0; s < sizeof(sizes) / sizeof(sizes[0]); ++s) {
             int size = sizes[s], left = 50 - size / 2;
             for (int light = 0; light < 2; ++light) {
-                uint8_t background = light ? 0x60 : 0xe0;
+                uint8_t background = light ? 0x66 : 0xee;
                 rotation = EPD_ROT_LANDSCAPE;
                 memset(reference, background, sizeof(reference));
                 ui_draw_icon(reference, 50, 50, size, (ui_icon_t)icon, light ? 255 : 0);
                 unsigned changes = 0;
                 for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
-                    uint8_t value = reference[y * W + x];
+                    uint8_t value = fb_level(reference, x, y);
                     changes += value != background;
                     assert(light ? value >= background : value <= background);
                     if (x < left || y < left || x >= left + size || y >= left + size)
@@ -172,7 +195,7 @@ static void test_icons(void) {
                     ui_draw_icon(fb, 50, 50, size, (ui_icon_t)icon, light ? 255 : 0);
                     for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
                         int px = x, py = y; physical(&px, &py);
-                        assert(fb[py * W + px] == reference[y * W + x]);
+                        assert(fb_level(fb, px, py) == fb_level(reference, x, y));
                     }
                 }
             }
@@ -196,16 +219,17 @@ int main(void) {
     rect_eq(ui_rect_union((EpdRect){INT_MIN,INT_MIN,10,10}, (EpdRect){0}), 0,0,0,0);
     uint8_t fb[W * H]; memset(fb, UI_GRAY_WHITE, sizeof(fb));
     ui_draw_control_frame(fb,(EpdRect){10,10,60,40},0,0xa0);
-    assert(fb[10*W+30]<128&&fb[11*W+30]<128&&fb[12*W+30]==255);
-    ui_draw_separator(fb,70,10,60,0xa0);assert(fb[70*W+30]<128&&fb[71*W+30]<128&&fb[72*W+30]==255);
-    ui_draw_round_rect(fb,(EpdRect){80,10,10,40},0,0xa0);assert(fb[10*W+85]>=128);
+    assert(fb_level(fb,30,10)<128&&fb_level(fb,30,11)<128&&fb_level(fb,30,12)==255);
+    ui_draw_separator(fb,70,10,60,0xa0);
+    assert(fb_level(fb,30,70)<128&&fb_level(fb,30,71)<128&&fb_level(fb,30,72)==255);
+    ui_draw_round_rect(fb,(EpdRect){80,10,10,40},0,0xa0);assert(fb_level(fb,85,10)>=128);
     memset(fb,UI_GRAY_WHITE,sizeof(fb));
     ui_draw_pressed_round_rect(fb, (EpdRect){10,10,60,40}, 0);
-    assert(fb[30 * W + 40] == UI_GRAY_LIGHT);
-    assert(fb[30 * W + 14] == UI_GRAY_BLACK && fb[30 * W + 16] == UI_GRAY_BLACK);
-    assert(fb[30 * W + 9] == UI_GRAY_WHITE);
+    assert(fb_level(fb,40,30) == (uint8_t)((UI_GRAY_LIGHT >> 4) * 17));
+    assert(fb_level(fb,14,30) == UI_GRAY_BLACK && fb_level(fb,16,30) == UI_GRAY_BLACK);
+    assert(fb_level(fb,9,30) == UI_GRAY_WHITE);
     // 按压底图之后绘制黑字像素，文字不反色。/ Draw black text pixels after the pressed background, without inversion.
-    epd_draw_pixel(40,30,UI_GRAY_BLACK,fb); assert(fb[30 * W + 40] == UI_GRAY_BLACK);
+    epd_draw_pixel(40,30,UI_GRAY_BLACK,fb); assert(fb_level(fb,40,30) == UI_GRAY_BLACK);
     test_icons();
     test_font_context();
     test_native_titles();

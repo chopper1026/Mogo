@@ -159,12 +159,6 @@ void continuous_du_mark_diff(
     for (int y = y0; y <= y1; y++) {
         int8_t* row = s_states + (size_t)y * width;
         for (int x = x0; x <= x1; x++) {
-            // 大片未变白底按两个像素跳过，保留仍在驱动的剩余相位。
-            // Skip unchanged pixel pairs, retaining any phases already in flight.
-            if (!(x & 1) && x < x1 &&
-                to[(size_t)y * (width / 2) + x / 2] == from[(size_t)y * (width / 2) + x / 2]) {
-                ++x; continue;
-            }
             const int dest = fb_nibble(to, width, x, y);
             const int src = fb_nibble(from, width, x, y);
             if (dest == src) continue;

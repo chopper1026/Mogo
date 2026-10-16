@@ -1,12 +1,14 @@
 # kiikoread
 
+> **利用条件：** 今後、新たな独自制作物に[個人学習ライセンス](licenses/kiikoread-Personal-Study-1.0.txt)を明示した場合、個人学習を許可し、別途書面による許諾のない商用利用を禁止します。**rc93 以前のコード・配布物、既存の Apache-2.0 の権利、第三者ライセンスは変更しません。** 適用範囲は [LICENSE](LICENSE) を参照してください。
+
 公開プロジェクト名は **kiikoread** です。Web サイトでは機器を「墨水屏」と表記し、GitHub URL・更新 URL・既存のバックアップ名は維持します。本体表示も kiikoread に統一します。白い公式サイトに画面プレビュー、機能紹介、版選択、Web USB 書き込み、Bin ダウンロードと[使用説明](flash/manual.html)を用意しました。`python3 tools/stage_public_flash.py _site` で公開ファイルを生成し、GitHub Pages / Cloudflare Pages の出力先を `_site` に設定できます。HTML と PDF は `docs/user-manual.zh-CN.json` から `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` で生成します（Python ReportLab が必要です）。
 正式 Bin は [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases) に保存し、公開サイト生成時に取得・検証します。OTA は kiikoread.com を優先し、失敗時は従来の GitHub 更新元へ戻ります。主サイトの生成は `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`、GitHub Pages では既定パラメーターを使います。
 
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-MindReset RDP-G01-W 向けの独立したオープンソース読書ファームウェアです。[MindReset の公式デモ](https://github.com/MindReset/read_pico_firmware)を基にしていますが、**MindReset の公式リリースではありません**。
+MindReset RDP-G01-W 向けの、ソースを公開している独立した読書ファームウェアです。ライセンスは上記の範囲ごとに適用します。[MindReset の公式デモ](https://github.com/MindReset/read_pico_firmware)を基にしていますが、**MindReset の公式リリースではありません**。
 
 EPUB と TXT の読書、読書位置の保存、TF カードのファイル管理、Wi-Fi・ホットスポット・USB での転送に対応します。[HTTPS オンライン書き込みページ](https://wegooo-cell.github.io/read-pico-reader/)は PC 版 Chrome または Edge と USB データケーブルで利用できます。書き込む前に基板型番を確認してください。通常の書き込みでは設定、読書記録、TF カードの内容を消去しません。
 
@@ -38,9 +40,9 @@ EPUB の本文の各章は新しいページから始まり、収まる場合は
 
 壁紙ロックの完成した16階調ディザ画像を `.readpico/locks/wallpaper.bin` に保存します。初回は生成、以降は検証して直接読み込みます。元画像や向きの変更・破損時は再生成し、書込み失敗でも通常のロックを維持します。追加の全画面バッファは常駐しません。表紙は画面への反映成功まで更新待ちを保持し、イベント中の読込みや表示失敗で消えないようにします。
 
-## 現行リリース：rc92
+## 現行リリース：rc93
 
-起動復旧と表紙キャッシュのメモリ使用を改善し、深いスリープ後に読書を復元します。中キー長押しを設定でき、ツール入口を保護します。読書票はシステム字体、ホーム・読書タイトルは各画面の字体を本来のサイズで描画します。USB・TF・OTA は同じビルドを使い、本体にも短い更新履歴を表示します。rc87 は公開を取り下げ、元の rc85/rc86 は引き続き選択できます。
+起動復旧と表紙キャッシュのメモリ使用を改善し、深いスリープ後に読書を復元します。中キー長押しを設定でき、画面下端からの上スワイプで常にツールを開けます。全キーを他の機能に設定しても、再起動・復元時に保持します。読書票はシステム字体、ホーム・読書タイトルは各画面の字体を本来のサイズで描画します。USB・TF・OTA は同じビルドを使い、本体にも短い更新履歴を表示します。rc87 は公開を取り下げ、元の rc85/rc86 は引き続き選択できます。
 
 
 ### 読書・低消費電力更新
@@ -68,7 +70,13 @@ TF カードは現在 FAT16/FAT32 に対応し、exFAT は有効になってい�
 
 ビルドには ESP-IDF v6.1 が必要です。ファームウェアには Noto Sans SC Medium のサブセットのみを内蔵し、追加のフォントや書籍は配布しません。
 
-本体の上流コードは Apache-2.0、UI アイコンは Lucide（ISC）、epdiy は LGPL-3.0-or-later、内蔵フォントは SIL OFL 1.1 に従います。適用範囲は [第三者ライセンス一覧](THIRD_PARTY_NOTICES.md)をご覧ください。
+[ライセンスポリシー](LICENSE)は、採用後に初めて公開され、明示された新規独自制作物のみに個人学習・非商用条件を適用します。独自のソース公開ライセンスであり、OSI 承認のオープンソースライセンスではありません。既存コード、過去の配布物と各貢献者の権利は維持し、[Apache-2.0 全文](licenses/Apache-2.0.txt)も保存しています。上流コードは Apache-2.0、Lucide は ISC、epdiy は LGPL-3.0-or-later、内蔵フォントは SIL OFL 1.1 に従います。詳細は [第三者ライセンス一覧](THIRD_PARTY_NOTICES.md)をご覧ください。
+
+### 起動診断と画面修復
+
+現在のソースに PR #32–#34 を統合しました。公開済み添付ファイルは各 Release の版に対応します。起動各段階の時間を既存の RTC ログに記録し、最初の画面表示後は起動記録を停止します。縦書きの補助線・破線間隔、横線記号の回転、章番号の位置を修正します。
+
+更新途中の電源断で黒白の帯が残る場合は、「設定 → 更新と復旧 → 画面修復」をタップします。数回の全面黒白駆動後に現在の画面とナビゲーションを復元します。手動操作時だけ実行し、通常のページ送り・波形表・VCOM 校正は変更しません。出力失敗は通知し、再試行できます。
 
 ### ファイル転送
 

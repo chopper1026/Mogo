@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""中文：实际电源识别器、图形与列表跟随边界回归。/ English: Real power input/raster and follow-scroll boundary regression.
+"""中文：实际电源识别器与图形边界回归。/ English: Real power input and raster boundary regression.
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
@@ -22,7 +22,6 @@ code=r'''
 #include <string.h>
 #include <stdlib.h>
 #include "ui_power_dialog.h"
-#include "ui_follow_scroll.h"
 #include "ui_kit.h"
 #define W 684
 #define H 1216
@@ -36,6 +35,7 @@ enum EpdRotation epd_get_rotation(void){return EPD_ROT_LANDSCAPE;}
 void epd_draw_vline(int x,int y,int h,uint8_t v,uint8_t *p){for(int j=0;j<h;++j)epd_draw_pixel(x,y+j,v,p);}
 void epd_draw_hline(int x,int y,int w,uint8_t v,uint8_t *p){for(int i=0;i<w;++i)epd_draw_pixel(x+i,y,v,p);}
 void epd_fill_rect(EpdRect r,uint8_t v,uint8_t *p){for(int y=r.y;y<r.y+r.height;++y)for(int x=r.x;x<r.x+r.width;++x)epd_draw_pixel(x,y,v,p);}
+void ui_fill_rect_fast(EpdRect r,uint8_t v,uint8_t *p){epd_fill_rect(r,v,p);}
 void epd_draw_line(int x,int y,int xx,int yy,uint8_t v,uint8_t *p){assert(x==xx||y==yy);if(x==xx)epd_draw_vline(x,y,yy-y+1,v,p);else epd_draw_hline(x,y,xx-x+1,v,p);}
 uint8_t ui_contrast_gray(uint8_t v){return v&0xf0;}
 void ui_clear_page(uint8_t *p){memset(p,255,sizeof(fb));}
@@ -49,7 +49,6 @@ for name in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_a
 code+=re.sub(r'^#include[^\n]*\n','',power,flags=re.M)
 code+=r'''
 static ui_power_dialog_t dialog;
-static ui_follow_scroll_t scroll;
 static cst836u_touch_t touch;
 static app_ctx_t ctx;
 static EpdRect dirty;
@@ -63,7 +62,6 @@ static void raster_check(void){
  }
  assert(changed);
 }
-static bool scroll_feed(int y,int n,bool pressed,bool released,int *offset,int limit,bool *handled){sample(300,y,n,pressed,released);return ui_follow_scroll_feed(&scroll,&ctx,160,1096,offset,limit,handled);}
 int main(int argc,char **argv){
  ui_power_dialog_draw(fb,&dialog);press();
  assert(feed(UI_POWER_THUMB_X+1,UI_POWER_THUMB_Y,1,false,false)==UI_POWER_ACTION_NONE&&dialog.position==1);raster_check();
@@ -95,24 +93,7 @@ int main(int argc,char **argv){
   feed(x-53,UI_POWER_BUTTON_Y-53,1,true,false);assert(feed(x-53,UI_POWER_BUTTON_Y-53,0,false,true)==UI_POWER_ACTION_NONE);
   feed(x,UI_POWER_BUTTON_Y,1,true,false);assert(feed(x+100,UI_POWER_BUTTON_Y,1,false,false)==UI_POWER_ACTION_NONE&&dialog.swallow);assert(feed(x,UI_POWER_BUTTON_Y,0,false,true)==UI_POWER_ACTION_NONE);
  }
- bool handled;int offset=0;
- assert(!scroll_feed(700,1,true,false,&offset,1000,&handled)&&!handled);
- assert(!scroll_feed(695,1,false,false,&offset,1000,&handled)&&!offset);
- assert(scroll_feed(650,1,false,false,&offset,1000,&handled)&&offset==50&&handled);
- assert(scroll_feed(649,1,false,false,&offset,1000,&handled)&&offset==51);
- assert(scroll_feed(400,1,false,false,&offset,1000,&handled)&&offset==300);
- assert(scroll_feed(450,1,false,false,&offset,1000,&handled)&&offset==250);
- assert(!scroll_feed(450,0,false,true,&offset,1000,&handled)&&offset==250&&handled);
- assert(!ui_follow_scroll_take_settle(&scroll,&ctx));
- while(scroll.coasting){sample(300,450,0,false,false);ui_follow_scroll_feed(&scroll,&ctx,160,1096,&offset,1000,&handled);assert(offset>=0&&offset<=250);}
- ctx.now_ms=scroll.settle_ms;assert(ui_follow_scroll_take_settle(&scroll,&ctx));assert(!ui_follow_scroll_take_settle(&scroll,&ctx));
- offset=250;
- assert(!scroll_feed(600,1,true,false,&offset,1000,&handled));assert(scroll_feed(590,1,false,false,&offset,1000,&handled)==false);assert(scroll_feed(100,1,false,false,&offset,1000,&handled)&&offset==750);assert(scroll_feed(0,1,false,false,&offset,1000,&handled)&&offset==850);
- sample(300,0,2,false,false);assert(!ui_follow_scroll_feed(&scroll,&ctx,160,1096,&offset,1000,&handled)&&handled&&offset==850);assert(!scroll_feed(0,0,false,true,&offset,1000,&handled));
- ui_follow_scroll_reset(&scroll);offset=0;scroll_feed(700,1,true,false,&offset,100,&handled);assert(scroll_feed(300,1,false,false,&offset,100,&handled)&&offset==100);assert(!scroll_feed(200,1,false,false,&offset,100,&handled)&&offset==100);scroll_feed(200,0,false,true,&offset,100,&handled);
- ui_follow_scroll_reset(&scroll);assert(!scroll_feed(1096,1,true,false,&offset,100,&handled)&&!scroll.tracking);assert(!scroll_feed(140,1,true,false,&offset,100,&handled)&&!scroll.tracking);
- ui_follow_scroll_reset(&scroll);scroll_feed(500,1,true,false,&offset,100,&handled);assert(!scroll_feed(500,0,false,true,&offset,100,&handled)&&!handled&&!scroll.settle_pending);
- printf("PASS: native power capture/release, 428 one-pixel drags, local raster bounds, no rectangular circle halo, fault/multitouch/clock cancellation, no end-tap shutdown, circle corners; list 1:1/reverse/clamps/one settle/faults and stationary taps\n");
+ printf("PASS: native power capture/release, 428 one-pixel drags, local raster bounds, no rectangular circle halo, fault/multitouch/clock cancellation, no end-tap shutdown, circle corners\n");
  if(argc>1){ui_power_dialog_reset(&dialog,false);text_log=true;ui_power_dialog_draw(fb,&dialog);FILE *file=fopen(argv[1],"wb");assert(file);fprintf(file,"P5\n%d %d\n255\n",W,H);for(int y=0;y<H;++y)for(int x=0;x<W;++x)fputc(epd_get_pixel(x,y,W,H,fb)*17/16,file);fclose(file);
  if(argc>2){ui_fill_round_rect(fb,(EpdRect){UI_POWER_TRACK_X,UI_POWER_TRACK_Y,UI_POWER_TRACK_W,UI_POWER_TRACK_H},UI_POWER_TRACK_H/2,0xe0);ui_draw_control_frame(fb,(EpdRect){UI_POWER_TRACK_X,UI_POWER_TRACK_Y,UI_POWER_TRACK_W,UI_POWER_TRACK_H},UI_POWER_TRACK_H/2,0x60);
  file=fopen(argv[2],"wb");assert(file);fprintf(file,"P5\n%d %d\n255\n",W,H);for(int y=0;y<H;++y)for(int x=0;x<W;++x)fputc(epd_get_pixel(x,y,W,H,fb)*17/16,file);fclose(file);}

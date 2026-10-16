@@ -26,3 +26,6 @@ void book_lock_collage_cache_commit(const uint8_t *framebuffer);
 /// 书架空闲时预生成一本拼贴封面到TF；不绘屏、不加载第二份字体、不保留像素。
 /// Warm one collage cover on SD while the shelf is idle; no display, second font or retained pixels.
 bool book_lock_collage_warm_cover(const char *path);
+
+/// 换卡/书库隐藏设置变化时丢弃小型目录索引；不改TF成品画面。/ Discard the small catalogue index on media/visibility changes, preserving completed TF artwork.
+void book_lock_collage_invalidate(void);

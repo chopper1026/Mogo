@@ -17,6 +17,8 @@
  * own Back/Home/Back keys; reading retains page turns, settings and hold-to-shelf.
  * Owners may opt into a single 500ms same-key hold callback after the press action; interruptions cancel it.
  * The menu handle still fires on press.
+ * 用户修订：四个主页面底栏作为统一导航路由在按下时报点即响应，模态和阅读手势保持原归属。
+ * User revision: root-tab routing commits on initial contact; modal controls and reader gestures retain their owners.
  * 用户修订：系统页面切换使用 GL16，不再每次 GC16 全刷；锁屏、手动强刷和周期清残影仍可全刷。
  * User revision: system page changes use GL16 instead of GC16; lock, manual refresh and periodic ghost cleanup may still use full refresh.
  * 用户修订：设置可选普通/快刷/水波纹，默认普通；普通保留原灰阶路线，快刷采用确认的黑白主页面和亚克力灰阶。用户反馈残影和黑带后，书架退出只同向擦白，主页水波纹改白底/24窄带且端点单向推动，中灰保留校准序列；五行横条局部移动、图标固定，没有异步补刷。
@@ -52,12 +54,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "read_pico_board.h"
+#include "read_pico_crashlog.h"
 #include "read_pico_pmu.h"
 #include "read_pico_transfer.h"
 #include "read_pico_sd.h"
 #include "settings.h"
 #include "sleep.h"
-#include "time_sync.h"
+#include "time_service.h"
+#include "ui_avatar.h"
+#include "book/book_cover_jobs.h"
+#include "book/book_lock_collage.h"
 #include "ttf_font.h"
 #include "app_font_context.h"
 #include "ui_kit.h"
@@ -73,6 +79,7 @@
 #if CONFIG_TOUCH_DIAG && CONFIG_TOUCH_DIAG_BEEP
 #include "read_pico_buzzer.h"
 #endif
+#include "local_latency_probe.h"
 
 #define TAG "app_loop"
 
@@ -200,6 +207,18 @@ void app_lock_ignore_for(int64_t ms) {
 static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
 #else
 void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+#ifdef KIIKO_LOCAL_LATENCY
+    const int64_t probe_start=esp_timer_get_time();
+    extern int64_t local_display_elapsed_us;
+    const int64_t probe_display=local_display_elapsed_us;
+#define LATENCY_PRESENT_DONE() do { if(redraw==APP_REDRAW_PAGE||redraw==APP_REDRAW_FULL) \
+    ESP_LOGI("latency","PRESENT page=%d redraw=%d total_us=%lld display_us=%lld paint_us=%lld", \
+    app_index_of(app),redraw,(long long)(esp_timer_get_time()-probe_start), \
+    (long long)(local_display_elapsed_us-probe_display), \
+    (long long)(esp_timer_get_time()-probe_start-(local_display_elapsed_us-probe_display))); } while(0)
+#else
+#define LATENCY_PRESENT_DONE() do {} while(0)
+#endif
 #endif
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
     if (redraw == APP_REDRAW_PAGE && ui_click_feedback_active()) {
@@ -221,6 +240,7 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
         s_presented_main == app && main_page_ready(ctx, app)) display_main_transition_arm(app, false, false);
     if (app->present != NULL && app->present(ctx, redraw)) {
         main_present_finished(ctx, app, redraw);
+        LATENCY_PRESENT_DONE();
         return;
     }
     switch (redraw) {
@@ -253,6 +273,8 @@ void app_present(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
     }
     guard_draw_result(ctx->hl, result);
     main_present_finished(ctx, app, redraw);
+    LATENCY_PRESENT_DONE();
+#undef LATENCY_PRESENT_DONE
 }
 
 #if CONFIG_TOUCH_DIAG
@@ -346,20 +368,38 @@ static void switch_to(
     app_ctx_t* ctx, const app_desc_t** current, const app_desc_t* next
 ) {
     if (next == NULL || next == *current) return;
+#ifdef KIIKO_LOCAL_LATENCY
+    const int64_t probe_start=esp_timer_get_time();
+    const int probe_from=app_index_of(*current);
+#endif
     bool main_source = main_page_ready(ctx, *current);
     bool shelf_source = main_source && app_index_of(*current) == 1;
     display_main_transition_cancel();
     if ((*current)->on_exit != NULL) (*current)->on_exit(ctx);
-    // 传书页独占无线：进页前让自动对时交出自己的会话，否则页面的会话起不来。
-    // The transfer page owns the radio: auto time sync hands its session back before entry, or the
+    // 传书页独占无线：进页前取消在途的后台对时，页面的会话才起得来。
+    // The transfer page owns the radio: an in-flight background sync cancels before entry, or the
     // page's own session cannot start.
-    if (next == &app_transfer) app_time_sync_yield_radio();
+    if (next == &app_transfer) app_time_service_cancel();
+#ifdef KIIKO_LOCAL_LATENCY
+    const int64_t probe_exit=esp_timer_get_time();
+#endif
     *current = next;
     app_font_activate_system();
+#ifdef KIIKO_LOCAL_LATENCY
+    const int64_t probe_font=esp_timer_get_time();
+#endif
     if (next->on_enter != NULL) next->on_enter(ctx);
+#ifdef KIIKO_LOCAL_LATENCY
+    const int64_t probe_enter=esp_timer_get_time();
+#endif
     if (main_source && main_page_ready(ctx, next)) display_main_transition_arm(next, shelf_source, true);
     app_present(ctx, next, next->enter_full ? APP_REDRAW_FULL : APP_REDRAW_PAGE);
     display_main_transition_disarm();
+#ifdef KIIKO_LOCAL_LATENCY
+    ESP_LOGI("latency","SWITCH from=%d to=%d mode=%d exit_us=%lld font_us=%lld enter_us=%lld present_us=%lld total_us=%lld",probe_from,app_index_of(next),app_settings_main_refresh_mode(),
+        (long long)(probe_exit-probe_start),(long long)(probe_font-probe_exit),(long long)(probe_enter-probe_font),
+        (long long)(esp_timer_get_time()-probe_enter),(long long)(esp_timer_get_time()-probe_start));
+#endif
     ESP_LOGI(TAG, "page -> %s", next->title);
 }
 
@@ -513,6 +553,7 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     bool gained = !*mounted && ready;
     *mounted = ready;
     if (ready) *invalidated = false;
+    if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
     if (!lost) return false;
     *invalidated = true;
@@ -609,7 +650,6 @@ void app_loop_run(const app_loop_config_t* config) {
     int64_t last_font_retry_ms = 0;
     int64_t last_media_poll_ms = 0;
     int64_t last_network_poll_ms = 0;
-    int64_t last_time_sync_ms = 0;
     int64_t last_input_ms = esp_timer_get_time() / 1000;
     uint32_t last_ble_input = ble_pt_input_serial();
     unsigned idle_minutes = app_settings_auto_lock_minutes();
@@ -623,16 +663,22 @@ void app_loop_run(const app_loop_config_t* config) {
     // The SD probe starts during board setup and is usually ready by the first product frame.
     // Retry here so the very first bookshelf paint already has a full CJK system face.
     try_load_saved_sd_font(false);
+    rp_boot_mark("sdfont");
     if (current->on_enter != NULL) current->on_enter(&ctx);
+    rp_boot_mark("enter");
     poll_media(&ctx, current, &media_mounted, &media_invalidated);
     // 首帧必须整屏 GC16：fb 里还是 app_main 画的开机图，DU 盖不掉。
     // First frame must be full GC16: fb still holds the splash; DU cannot cover it.
     app_present(&ctx, current, APP_REDRAW_FULL);
+    rp_boot_mark("frame");
     pico_boot_ready();
     ESP_LOGI(TAG, "UI ready on %s", current->title);
     // 上次崩溃的现场（异常类型与触发地址）：有的话打一遍，串口和屏幕各有一份。
     // The previous panic scene, when there was one: logged here, and shown on the home screen.
     crash_note_log();
+#ifdef KIIKO_LOCAL_LATENCY
+    local_latency_init();
+#endif
 
     // F4：主循环被刷屏等操作阻塞期间由采样任务持续读触摸，恢复后逐帧回放，边沿
     // 不丢；任务创建失败时 active() 为假，循环内自动回退直读（原行为）。
@@ -741,15 +787,13 @@ void app_loop_run(const app_loop_config_t* config) {
         if (ctx.now_ms - last_network_poll_ms >= 500) {
             last_network_poll_ms = ctx.now_ms;
             TD_TIME("transfer_poll", read_pico_transfer_service_poll());
-        }
-        // 自动对时是系统服务（同 poll_media / 字体重试），页内逻辑仍留在页面里；传书页要自己
-        // 起会话，占用无线期间让路，避免和页面抢同一个会话。
-        // Auto time sync is a system service like poll_media or the font retry; page logic stays in
-        // its page. The transfer page starts its own session, so it keeps the radio free of us.
-        if (ctx.now_ms - last_time_sync_ms >= 2000) {
-            last_time_sync_ms = ctx.now_ms;
-            app_time_sync_poll(ctx.now_ms, current == &app_transfer || usb_storage_active() ||
-                pico_online_busy());
+            // 后台对时是系统服务（同 poll_media / 字体重试），守卫在 time_service 内部；
+            // 空闲门控沿用上游：触压、近期输入、独占 PMU 的页面、USB 与联网升级期间不动。
+            // Background sync is a system service like poll_media or the font retry, with its
+            // guards inside time_service; idle gating stays upstream: no touch, no recent input,
+            // pages holding the PMU, USB or an online update.
+            app_time_service_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
+                !current->holds_pmu && !usb_storage_active() && !pico_online_busy() && !ble_pt_connected());
         }
         // A load may have captured navigation after the prior switch. Consume it at the normal boundary.
 
@@ -890,11 +934,27 @@ void app_loop_run(const app_loop_config_t* config) {
             ui_click_feedback_cancel_at(touch.x, touch.y))) {
             if (ui_click_feedback_release(ctx.fb, &click_area)) click_present(&ctx, current, click_area);
         }
+        // 主页面底栏在首次单指报点就确认；抬手、轻滑和停留不再重复切页。
+        // Commit root navigation on the first single contact; lift, small motion and holds never repeat it.
+        bool nav_press_owned = false;
+        if (err == ESP_OK && pressed && touch.count == 1 && !power_input_owned &&
+            !quick_input_owned && !menu_open && !usb_storage_active() && !ctx.request_app &&
+            main_page_ready(&ctx, current)) {
+            const int tab = ui_nav_hit(touch.x, touch.y);
+            if (tab >= 0) {
+                held_key = -1;
+                cancel_gesture(&ctx, current, &gesture);
+                ctx.consumed = true;
+                ctx.user_activity = true;
+                nav_press_owned = true;
+                if (tab != app_index_of(current)) ui_nav_request(&ctx, tab);
+            }
+        }
         if (err == ESP_OK && pressed && touch.count == 1 && !power_input_owned &&
             !quick_input_owned && !menu_open && !usb_storage_active() &&
             ui_click_feedback_press(ctx.fb, touch.x, touch.y, &click_area))
             click_present(&ctx, current, click_area);
-        if (!power_input_owned && !quick_input_owned && pressed && err == ESP_OK) {
+        if (!power_input_owned && !quick_input_owned && !nav_press_owned && pressed && err == ESP_OK) {
             held_key = -1;
             const int key = ui_key_hit_test(touch.x, touch.y);
             const bool handle_hit = ui_menu_handle_hit_test(touch.x, touch.y) &&
@@ -1180,6 +1240,14 @@ void app_loop_run(const app_loop_config_t* config) {
             feedback.updates = 0;
         }
         if (!menu_open) feedback.updates = 0;
+#ifdef KIIKO_LOCAL_LATENCY
+        static int64_t probe_heartbeat;
+        if(ctx.now_ms-probe_heartbeat>5000){probe_heartbeat=ctx.now_ms;ESP_LOGI("latency","STATE touch=%d menu=%d dialog=%d usb=%d",touch.touched,menu_open,power_dialog_open,usb_storage_active());}
+        if(!menu_open&&!power_dialog_open&&!usb_storage_active()&&!touch.touched) {
+            app_redraw_t probe=local_latency_poll(&ctx,current);
+            if(probe!=APP_REDRAW_NONE)app_present(&ctx,current,probe);
+        }
+#endif
         // 返回来源优先；普通请求仍按切页优先处理。
         // Return requests win; ordinary requests still prioritize page switches.
         // USB MSC 持有 TF 卡时禁止任何页面切换；必须先安全停止并重新挂载。
@@ -1250,6 +1318,6 @@ void app_loop_run(const app_loop_config_t* config) {
 #endif
         // 连续列表相位期间缩短等待；每次仍读触摸，并给其他任务让出一个调度周期。
         // Reduce waits during continuous list phases; poll touch each time and yield one scheduling tick.
-        vTaskDelay(pdMS_TO_TICKS(!menu_open&&!power_dialog_open&&display_follow_busy()?1:LOOP_TICK_MS));
+        vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
     }
 }

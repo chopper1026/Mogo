@@ -5,6 +5,8 @@
  * User revision: fast acrylic retains calibrated GL16; remove the dark, slow experimental gray drive and keep directional whitening for shelf paging/exit.
  */
 #include "display_main_waveform.h"
+#include "display_waveform_smooth.h"
+#include "esp_heap_caps.h"
 #include "app_config.h"
 #include "e0470_epaper_waveform.h"
 #include <stdbool.h>
@@ -113,4 +115,26 @@ const EpdWaveform* display_main_bw_waveform(void) {
         s_bw_waveform.temp_intervals=E0470_WAVEFORM.temp_intervals;s_bw_ready=true;
     }
     return &s_bw_waveform;
+}
+
+// 普通切页独立派生；水波纹/快刷不改，内存紧张回退现有柔和表。
+// Derive ordinary output independently; water/fast stay unchanged and low memory falls back to the existing soft table.
+const EpdWaveform* display_main_normal_waveform(void) {
+    static EpdWaveformPhases phases;
+    static const EpdWaveformPhases *ranges[]={&phases};
+    static EpdWaveformMode mode={MODE_GL16,1,ranges};
+    static const EpdWaveformMode *modes[]={&mode};
+    static EpdWaveform waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=modes};
+    if(phases.luts)return &waveform;
+    const EpdWaveform *base=display_main_water_waveform();
+    const EpdWaveformPhases *original=e0470_waveform_phases(base,MODE_GL16);
+    if(!original||!original->luts||original->phases!=E0470_GL16_FRAMES||original->phase_times)return base;
+    uint8_t *data=heap_caps_malloc(E0470_GL16_FRAMES*16*4,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!data)return base;
+    memcpy(data,original->luts,E0470_GL16_FRAMES*16*4);
+    for(int to=1;to<15;++to)for(int from=0;from<16;++from)
+        if(to!=from)display_soften_gray_pair(data,original,to,from);
+    phases=(EpdWaveformPhases){E0470_GL16_FRAMES,data,NULL};
+    waveform.temp_intervals=base->temp_intervals;
+    return &waveform;
 }

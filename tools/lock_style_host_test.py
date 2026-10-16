@@ -70,6 +70,9 @@ static void app_lock_wait_key_idle(int ms){assert(ms==800);}
 static app_wake_source_t app_light_sleep_wait_timed(void *acc,unsigned ms){assert(acc==(void*)1&&(ms==0||ms==600000));if(ms==0)return APP_WAKE_KEY;return timeout?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static void read_pico_pmu_drain_events(void){}
+// 后台对时取消只验证被调用，本测试不桥接对时状态机。/ Cancelling background sync is only counted as called; this test does not bridge its state machine.
+static unsigned time_cancels;
+static void app_time_service_cancel(void){++time_cancels;}
 static int64_t esp_timer_get_time(void){return 2000000;}
 static bool lock_screen_restore(uint8_t *fb){if(!cache_ok||cached_style!=style)return false;memset(fb,0x10+style,FRAME_BYTES);return true;}
 static void lock_screen_authenticate(void *h,void *tp,void *acc,bool boot,bool light_only){(void)h;(void)light_only;assert(tp==(void*)2&&acc==(void*)1);assert(pin);assert(boot==boot_cache);assert(pixels[0]==(draw_ok?0x10+style:0xfe));++auths;}

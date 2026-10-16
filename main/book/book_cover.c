@@ -456,9 +456,9 @@ static void cover_cache_write(const char *path, const cover_cache_header_t *head
     remove(temp);
 }
 
-bool book_cover_load_gray(const char *path, const char *title, const char *author,
+static bool book_cover_load_gray_impl(const char *path, const char *title, const char *author,
                           uint8_t out[BOOK_COVER_W * BOOK_COVER_H],
-                          bool allow_decode, bool *pending) {
+                          bool allow_decode, bool *pending, bool allow_auto, bool *auto_cache) {
     if (pending) *pending = false;
     if (!path || !*path || !out) return false;
     char canonical_title[256];
@@ -478,11 +478,14 @@ bool book_cover_load_gray(const char *path, const char *title, const char *autho
         uint8_t *data = NULL;
         size_t size = 0;
         bool png = false;
-        esp_err_t err = book_epub_cover(path, &data, &size, &png);
+        size_t free_bytes=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+        size_t budget=free_bytes>2u*1024u*1024u?free_bytes-2u*1024u*1024u:0;
+        esp_err_t err = budget ? book_epub_cover_bounded(path,&data,&size,&png,budget) : ESP_ERR_NO_MEM;
         if (err == ESP_OK) good = book_cover_thumbnail(data, size, png, out);
         free(data);
         if (err == ESP_ERR_NO_MEM) cache_result = false;
     }
+    if (!good && !allow_auto) { if(pending)*pending=true;if(auto_cache)*auto_cache=cache_result;return false; }
     if (!good) good = book_auto_cover_render(path, title, author, BOOK_COVER_W, BOOK_COVER_H, out);
     if (good && cache_result) cover_cache_write(cache_path, &key, out);
     return good;
@@ -490,9 +493,9 @@ bool book_cover_load_gray(const char *path, const char *title, const char *autho
 
 // 与网格缓存分离，不能把已经裁剪的封面当作完整原图。
 // Separate from grid thumbnails: a cropped cache cannot represent the complete source.
-bool book_cover_load_list_gray(const char *path, const char *title, const char *author,
+static bool book_cover_load_list_gray_impl(const char *path, const char *title, const char *author,
                                uint8_t out[BOOK_COVER_W * BOOK_COVER_H], bool allow_decode,
-                               bool *pending, unsigned *width, unsigned *height) {
+                               bool *pending, unsigned *width, unsigned *height, bool allow_auto, bool *auto_cache) {
     if (pending) *pending = false;
     if (!path || !out || !width || !height) return false;
     *width = BOOK_COVER_W; *height = BOOK_COVER_H;
@@ -538,6 +541,7 @@ bool book_cover_load_list_gray(const char *path, const char *title, const char *
         free(data);
         if ((error != ESP_OK && error != ESP_ERR_NOT_FOUND) || (error == ESP_OK && !good)) cacheable = false;
     }
+    if (!good && !allow_auto) { if(pending)*pending=true;if(auto_cache)*auto_cache=cacheable;return false; }
     if (!good) {
         *width = BOOK_COVER_W; *height = BOOK_COVER_H;
         good = book_auto_cover_render(path, title, author, *width, *height, out);
@@ -612,10 +616,11 @@ bool book_cover_fast_cache_read(const char *source, const char *title, const cha
     if (ok) *white_edge = found.white_edge != 0;
     return ok;
 }
-void book_cover_fast_cache_write(const char *source, const char *title, const char *author,
-                                 book_fast_cover_key_t key, const uint8_t *out, bool white_edge) {
+static void fast_cache_write(const char *source,const char *title,const char *author,
+                             book_fast_cover_key_t key,const uint8_t *out,bool white_edge,int64_t size,int64_t modified) {
     char path[120], temp[128]; fast_cover_header_t header;
     if (!out || !fast_cover_key(source, title, author, key, path, &header)) return;
+    if(size>=0&&(header.source.file_size!=(uint64_t)size||header.source.modified!=modified))return;
     if ((mkdir("/sdcard/.readpico", 0777) && errno != EEXIST) ||
         (mkdir("/sdcard/.readpico/covers", 0777) && errno != EEXIST)) return;
     if (snprintf(temp, sizeof(temp), "%s.tmp", path) >= (int)sizeof(temp)) return;
@@ -759,4 +764,44 @@ bool book_image_file_grayscale(const char *path, bool png, unsigned width, unsig
     }
     fclose(file);
     return ok;
+}
+
+bool book_cover_load_gray(const char *p,const char *t,const char *a,uint8_t out[BOOK_COVER_W * BOOK_COVER_H],bool decode,bool *pending) {
+    return book_cover_load_gray_impl(p,t,a,out,decode,pending,true,NULL);
+}
+bool book_cover_load_list_gray(const char *p,const char *t,const char *a,uint8_t out[BOOK_COVER_W * BOOK_COVER_H],bool decode,bool *pending,unsigned *w,unsigned *h) {
+    return book_cover_load_list_gray_impl(p,t,a,out,decode,pending,w,h,true,NULL);
+}
+int book_cover_load_io(const char *p,const char *t,const char *a,uint8_t *out,bool list,unsigned *w,unsigned *h,bool *auto_cache) {
+    bool automatic=false;*w=BOOK_COVER_W;*h=BOOK_COVER_H;
+    bool ready=list?book_cover_load_list_gray_impl(p,t,a,out,true,&automatic,w,h,false,auto_cache):
+                    book_cover_load_gray_impl(p,t,a,out,true,&automatic,false,auto_cache);
+    return ready?1:automatic?0:-1;
+}
+bool book_cover_list_cache_dimensions(const char *p,const char *t,const char *a,unsigned *w,unsigned *h) {
+    char canonical[256],path[120];cover_cache_header_t key,found;
+    if(book_title_from_path(p,canonical,sizeof(canonical)))t=canonical;
+    if(!cover_cache_key(p,t,a,path,sizeof(path),&key))return false;
+    char *suffix=strrchr(path,'.');if(!suffix)return false;strcpy(suffix,"-list.bin");
+    FILE *f=fopen(path,"rb");if(!f)return false;
+    bool ok=fread(&found,1,sizeof(found),f)==sizeof(found)&&found.magic==key.magic&&found.schema==key.schema&&
+        found.template_version==key.template_version&&found.file_size==key.file_size&&found.modified==key.modified&&
+        found.path_hash==key.path_hash&&found.text_hash==key.text_hash&&found.width&&found.height&&
+        found.width<=BOOK_COVER_W&&found.height<=BOOK_COVER_H;
+    fclose(f);if(ok){*w=found.width;*h=found.height;}return ok;
+}
+void book_cover_store_generated(const char *p,const char *t,const char *a,const uint8_t *pixels,bool list,int64_t size,int64_t modified) {
+    char canonical[256],path[120];cover_cache_header_t key;
+    if(book_title_from_path(p,canonical,sizeof(canonical)))t=canonical;
+    if(!cover_cache_key(p,t,a,path,sizeof(path),&key))return;
+    if(key.file_size!=(uint64_t)size||key.modified!=modified)return;
+    if(list){char *suffix=strrchr(path,'.');if(!suffix)return;strcpy(suffix,"-list.bin");}
+    cover_cache_write(path,&key,pixels);
+}
+
+void book_cover_fast_cache_write(const char *p,const char *t,const char *a,book_fast_cover_key_t key,const uint8_t *pixels,bool edge) {
+    fast_cache_write(p,t,a,key,pixels,edge,-1,0);
+}
+void book_cover_fast_cache_write_checked(const char *p,const char *t,const char *a,book_fast_cover_key_t key,const uint8_t *pixels,bool edge,int64_t size,int64_t modified) {
+    fast_cache_write(p,t,a,key,pixels,edge,size,modified);
 }

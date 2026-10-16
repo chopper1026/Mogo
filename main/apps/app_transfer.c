@@ -225,7 +225,7 @@ static EpdRect method_control_rect(int id) {
 // S05 keeps method selection separate from the service details shown on the next page.
 static void draw_methods(uint8_t *fb) {
     ui_clear_page(fb);
-    epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
+    ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
     transfer_header(fb, "Wifi/热点传书", NULL);
     ui_text(fb, 42, 180, 21, "选择方式", EPD_DRAW_ALIGN_LEFT, false);
     EpdRect card = {36, 224, 612, 224};
@@ -240,7 +240,7 @@ static void draw_methods(uint8_t *fb) {
     for (int i = 0; i < 2; ++i) {
         EpdRect row = method_control_rect(i);
         if (s_pressed == i) ui_draw_pressed_round_rect(fb, row, 0);
-        if (i) epd_fill_rect((EpdRect){68, row.y, 548, 2}, 0x80, fb);
+        if (i) ui_fill_rect_fast((EpdRect){68, row.y, 548, 2}, 0x80, fb);
         int cy = row.y + row.height / 2;
         if (i == 0) ui_nav_wifi_icon(fb, 72, cy, 30, 0x6a);
         else if (i == 1) ui_draw_icon(fb, 72, cy, 48, UI_ICON_RADIO_TOWER, 0x6a);
@@ -314,7 +314,7 @@ static void network_button(uint8_t *fb, int id, const char *label, bool dark) {
 
 static void draw_networks(uint8_t* fb) {
     ui_clear_page(fb);
-    epd_fill_rect((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
+    ui_fill_rect_fast((EpdRect){0, 0, UI_LOCK_WIDTH, UI_NAV_TOP}, 0xe0, fb);
     if (s_forget_confirm) {
         transfer_header(fb, "遗忘网络", "仅清除 WiFi 连接信息，不影响图书");
         char name[33];
@@ -372,7 +372,7 @@ static void draw_networks(uint8_t* fb) {
         const read_pico_transfer_network_t* network = &s_networks[index];
         EpdRect rect = network_control_rect(row);
         if (s_pressed == row) ui_draw_pressed_round_rect(fb, rect, 0);
-        if (row) epd_fill_rect((EpdRect){64, rect.y, 556, 2}, 0x70, fb);
+        if (row) ui_fill_rect_fast((EpdRect){64, rect.y, 556, 2}, 0x70, fb);
         char name[33], detail[64];
         snprintf(name, sizeof(name), "%s", network->ssid);
         fit_label(name, 28, 520);

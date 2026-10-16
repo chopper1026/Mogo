@@ -155,10 +155,10 @@ int main(void) {
     app_settings_set_book_indent_adjust(-7);
     has_keys[0]=has_keys[1]=has_keys[2]=true;
     loaded_keys[0]=APP_READER_KEY_PREV;loaded_keys[1]=APP_READER_KEY_HOME;loaded_keys[2]=APP_READER_KEY_NONE;
-    app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS);
+    app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     loaded_hold=APP_READER_KEY_TOOLS;has_hold=true;
     app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME && app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
-    loaded_hold=APP_READER_KEY_REFRESH;app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS);
+    loaded_hold=APP_READER_KEY_REFRESH;app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     test_loaded_fast = 1;
     app_settings_init();
     assert(app_settings_main_refresh_mode()==APP_MAIN_REFRESH_NORMAL);
@@ -182,13 +182,13 @@ int main(void) {
     app_settings_set_reader_key_preset(99);assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME);
     app_settings_set_reader_key_action(0,APP_READER_KEY_COUNT);assert(app_settings_reader_key_action(0)==APP_READER_KEY_HOME);
     int guard_commits=commit_count;
-    assert(!app_settings_reader_key_action_allowed(2,APP_READER_KEY_REFRESH));
-    assert(!app_settings_set_reader_key_action(2,APP_READER_KEY_REFRESH));
-    assert(commit_count==guard_commits&&app_settings_reader_key_action(2)==APP_READER_KEY_TOOLS);
+    assert(app_settings_reader_key_action_allowed(2,APP_READER_KEY_REFRESH));
+    assert(app_settings_set_reader_key_action(2,APP_READER_KEY_REFRESH));
+    assert(commit_count==guard_commits+1&&app_settings_reader_key_action(2)==APP_READER_KEY_REFRESH);
     assert(app_settings_set_reader_hold_action(APP_READER_KEY_TOOLS));
     assert(app_settings_set_reader_key_action(2,APP_READER_KEY_REFRESH));
-    assert(!app_settings_set_reader_hold_action(APP_READER_KEY_HOME));
-    assert(app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
+    assert(app_settings_set_reader_hold_action(APP_READER_KEY_HOME));
+    assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     assert(app_settings_set_reader_key_action(0,APP_READER_KEY_TOOLS));
     assert(app_settings_set_reader_hold_action(APP_READER_KEY_REFRESH));
     assert(app_settings_set_reader_key_action(2,APP_READER_KEY_REFRESH));
@@ -430,7 +430,7 @@ int main(void) {
     s_reader_hold_action=APP_READER_KEY_HOME;assert(app_settings_backup_restore()==ESP_OK);
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME && app_settings_main_fast_refresh() && app_settings_book_indent_adjust()==0);
     assert(wifi_imports==prior_wifi+1&&history_restores==prior_history+1);
-    assert(app_settings_reader_key_action(0)==saved_keys.actions[0]&&app_settings_reader_key_action(1)==APP_READER_KEY_TOOLS&&app_settings_reader_key_action(2)==saved_keys.actions[2]);
+    assert(app_settings_reader_key_action(0)==saved_keys.actions[0]&&app_settings_reader_key_action(1)==saved_keys.actions[1]&&app_settings_reader_key_action(2)==saved_keys.actions[2]);
     assert(app_settings_backup_save()==ESP_OK); // Continue v8 conversion from current v11.
     // v8 的旧实验位不启用新模式，既有备份仍可恢复。
     // A v8 retired-test bit cannot enable a new mode; existing backups remain readable.
@@ -476,7 +476,17 @@ int main(void) {
     app_settings_set_reader_key_preset(1);
     assert(app_settings_backup_restore()==ESP_OK);
     assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME && app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
-    assert(!app_settings_set_reader_hold_action(APP_READER_KEY_NONE));
+    assert(app_settings_set_reader_hold_action(APP_READER_KEY_NONE));
+    // 无工具栏按键的映射在保存、恢复和重启后保持不变；固定上滑入口由阅读控制测试覆盖。
+    // A mapping without toolbar keys survives save/restore/reboot; reader-control tests cover the invariant swipe entry.
+    assert(app_settings_set_reader_key_action(0,APP_READER_KEY_PREV));
+    assert(app_settings_set_reader_key_action(1,APP_READER_KEY_HOME));
+    assert(app_settings_set_reader_key_action(2,APP_READER_KEY_NEXT));
+    assert(app_settings_backup_save()==ESP_OK);app_settings_set_reader_key_preset(1);
+    assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
+    assert(app_settings_reader_hold_action()==APP_READER_KEY_NONE&&app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
+    assert(!app_settings_reader_key_action_allowed(4,APP_READER_KEY_TOOLS));
+    assert(!app_settings_reader_key_action_allowed(0,APP_READER_KEY_COUNT));
     app_settings_set_reader_key_preset(1);
     s_book_px = 70;
     assert(app_settings_backup_save() == ESP_OK); /* Overwrite an existing backup. */

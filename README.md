@@ -1,18 +1,20 @@
 # kiikoread
 
+> **Licensing:** New original material explicitly marked with the [Personal Study License](licenses/kiikoread-Personal-Study-1.0.txt) permits personal study and prohibits commercial use without separate written permission. **This policy does not relicense rc93 or earlier code/binaries, remove existing Apache-2.0 rights, or override third-party licenses.** See [LICENSE](LICENSE) for the exact scope.
+
 The public project name is **kiikoread**. The website calls the device an ink-screen reader; the GitHub URL and legacy update/backup filenames remain compatible. Firmware UI branding also uses kiikoread. The bright-white website includes screen previews, features, version selection, web USB flashing, Bin downloads and an [online user manual](flash/manual.html). Stage it with `python3 tools/stage_public_flash.py _site`; both GitHub Pages and Cloudflare Pages can serve `_site`. The PDF can be regenerated from `docs/user-manual.zh-CN.json` with `tools/build_user_manual.py --font /path/to/a/static-CJK.ttf` (Python ReportLab required).
 Official firmware binaries are stored in [GitHub Releases](https://github.com/wegooo-cell/read-pico-reader/releases). The verified site staging step retrieves the matching assets; do not publish the raw flash directory. Device OTA checks `https://kiikoread.com/update.json` first, with the existing GitHub Pages feed as a fallback. Stage the primary site with `python3 tools/stage_public_flash.py _site --ota-origin https://kiikoread.com`; keep the default origin for GitHub Pages.
 
 
 [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-An independent, open-source reading firmware for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**.
+An independent reading firmware with publicly available source for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**. Licenses apply by scope as described above.
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current release: rc92
+## Current release: rc93
 
-This release adds selectable clocks, monthly reading records, shelf categories and retained page positions, with smoother inertial scrolling, short clock updates, cached avatars, fine reading weight, vertical reading and page-turner fixes. Tickets use the system font; home and reader titles reuse their respective active fonts at native sizes. USB, TF and OTA share one build and short device notes. rc87 is withdrawn; original rc85/rc86 releases remain selectable. See the [changelog](docs/CHANGELOG.md).
+This release prioritizes rapid page turns, processed cover caches and a single ordinary acrylic shelf scan, reduces collage/chapter working memory, prepares avatars in the background and improves RTC calibration. Continue-card return follows the opening origin; bottom-edge Tools no longer requires a key mapping. Settings use discrete swipes in all main modes. USB, TF and OTA share one build; historical releases remain available. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 
@@ -31,7 +33,7 @@ The main-screen ripple matches the reader's compact launch timing: eight bands, 
 
 List covers bounce gently and settle before opening. Only the cover movement region updates: fast mode uses monochrome differentials, ordinary/water retain grays, without an extra feedback frame.
 
-Swipe down from the top edge to open the WiFi, Bluetooth, refresh and lock controls; swipe up, tap outside or press Back to close. WiFi connects the last saved network or disconnects it, unless a transfer is busy. Reader key controls offer custom actions and two presets. The default is Previous / Tools / Next; the second is Home / Full screen / Tools. A middle hold defaults to Home and can also be mapped to refresh or other actions. At least one of the three short presses or the middle hold must open Tools; startup and backup restoration repair a missing entry to middle-short Tools. Center double taps always toggle full screen, independently of mappings. Single taps use left/right halves or upper 1/3 / lower 2/3. New books open full screen; a page turn dismisses Tools and returns to full screen. These choices persist across reboot and configuration restore.
+Swipe down from the top edge to open the WiFi, Bluetooth, refresh and lock controls; swipe up, tap outside or press Back to close. WiFi connects the last saved network or disconnects it, unless a transfer is busy. Reader key controls offer custom actions and two presets. The default is Previous / Tools / Next; the second is Home / Full screen / Tools. A middle hold defaults to Home and can also be mapped to refresh or other actions. Swiping up from the bottom edge always opens Tools, independently of turn or key settings. All three short presses and the middle hold may use other actions; startup and backup restoration preserve those choices. Center double taps always toggle full screen, independently of mappings. Single taps use left/right halves or upper 1/3 / lower 2/3. New books open full screen; a page turn dismisses Tools and returns to full screen. These choices persist across reboot and configuration restore.
 
 The firmware checkpoints the book, position and full-screen state before lock, consuming deep-wake resume only once. Interrupted opening routes to an operable recovery page with the book name, Home and confirmed deletion, without automatic retries. Tickets always use the system face and restore the reader face on light wake. Quick controls retain grayscale borders in all main modes. Fast mode retains only BW covers; ordinary/water retain only gray covers and free obsolete formats on a policy change. Home resume titles reuse the active system face at 40px; reader book/chapter titles reuse the reader face at 32/48px. Outlines rasterize directly without additional built-in fonts or simultaneously loading system and reader faces; unavailable faces retain the safe built-in missing-glyph fallback. These changes are included in rc88.
 
@@ -115,9 +117,15 @@ EPUB metadata is allocated for the actual book size. ZIP entries and chapters ea
 
 EPUB body chapters begin on a new page, keeping the title with the opening text when it fits. This also applies to recognized chapter headings within one XHTML resource. TOC links, introductory information and copyright metadata are excluded from body chapter detection; ordinary subheadings continue on the current page. Detection uses authored navigation, standalone numbered headings and body structure; books without reliable markers may still need individual compatibility fixes.
 
+## Boot diagnostics and panel repair
+
+The current source integrates PR #32–#34; release attachments remain tied to their published versions. Boot-phase timing is recorded in the existing RTC trail and shown in Overview's last-run area. Boot marks stop after the first frame. Vertical reading guides sit beside the glyph cells with a shared dash phase, chapter numbers align with ideographs, and dash-like symbols follow vertical rotation.
+
+For persistent black or white stripes after a power cut during a refresh, tap **Settings → Upgrade and recovery → Panel repair**. It performs several full-screen black/white drives and restores the current page including navigation. It runs only on an explicit tap and preserves normal reading rules, waveform tables and VCOM calibration. A failed final output reports failure and allows retry.
+
 ## Licenses and credit
 
-The fork retains the upstream **Apache-2.0** license and notices. The UI icon set comes from **Lucide** under its **ISC** notice. The modified epdiy driver uses **LGPL-3.0-or-later**, and pypinyin dictionary data uses **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories for the exact scope; a component license does not change the license of the entire firmware.
+The [license policy](LICENSE) introduces a **personal-study, noncommercial license** only for explicitly marked new original material first published after its adoption. The custom license is source-available, not an OSI-approved open-source license. Existing Apache-2.0 grants, historical releases and contributors' rights remain intact; the [original Apache-2.0 text](licenses/Apache-2.0.txt) is preserved. Lucide icons retain **ISC**, the modified epdiy driver retains **LGPL-3.0-or-later**, and pypinyin dictionary data retains **MIT**. See [Third-party notices](THIRD_PARTY_NOTICES.md) and component directories. The new policy does not make all existing firmware noncommercial.
 
 Please report firmware bugs in this repository, not in the MindReset upstream issue tracker. Hardware purchasing and repair remain matters for the [official support channels](https://dot.mindreset.tech/docs/contact).
 

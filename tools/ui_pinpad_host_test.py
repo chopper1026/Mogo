@@ -39,6 +39,7 @@ size_t heap_caps_get_largest_free_block(int);
 #include "ttf_font.h"
 #include "epdiy.h"
 #include "ui_pinpad.h"
+#include "assets/ui_icons.h"
 static struct {void *p;size_t bytes;} allocations[8192];
 static size_t live,capacity=8*1024*1024;
 static int fail_after=-1,fallbacks;
@@ -60,7 +61,9 @@ static uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 '''
  for n in ('_rotate','epd_draw_pixel','epd_get_pixel','epd_draw_hline','epd_draw_vline','epd_fill_rect','epd_draw_circle','epd_fill_circle_helper','epd_fill_circle'):
   unit+=function(n,ROOT/'components/epdiy/src/epdiy.c')+'\n'
- for n in ('clamp_radius','draw_arc','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
+ # 提取真实绘制原语：键盘的锁图标和删除键下划线走 ui_draw_icon / ui_fill_rect_fast。
+ # Extract the real drawing primitives: the pad's lock icon and delete underline use ui_draw_icon / ui_fill_rect_fast.
+ for n in ('ui_read_pixel','icon_nibble','ui_draw_icon','clamp_radius','draw_arc','ui_rotate_rect_to_fb','ui_fill_rect_fast','ui_draw_round_rect'):unit+=function(n,ROOT/'main/ui/ui_kit.c')+'\n'
  unit+=r'''
 int ui_font_title_px(int n,const char *v){(void)v;return n;}
 void ui_font_measure_line_px(int n,const char *v,int *a,int *b){(void)v;*a=n;*b=0;}

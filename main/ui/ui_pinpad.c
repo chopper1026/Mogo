@@ -149,7 +149,7 @@ void ui_pinpad_paint_input(uint8_t *fb,const ui_pinpad_t *pad){
         for(int r=67;r>=63;--r)epd_draw_circle(cx,cy,r,pad->pressed==hit?0:255,fb);
     }else if(hit>=10){
         EpdRect box=key_rect(hit);
-        epd_fill_rect((EpdRect){box.x+32,box.y+54,76,2},pad->pressed==hit?0:255,fb);
+        ui_fill_rect_fast((EpdRect){box.x+32,box.y+54,76,2},pad->pressed==hit?0:255,fb);
     }
     unsigned count=pad->count+(pad->pressed>=0&&pad->pressed<10&&pad->count<4);
     for(int i=0;i<4;++i)epd_fill_circle(241+i*67,401,12,(unsigned)i<count?0:255,fb);

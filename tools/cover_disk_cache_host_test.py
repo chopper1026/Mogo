@@ -37,7 +37,7 @@ typedef struct {unsigned width,height,stride,contrast,phase;} book_fast_cover_ke
 '''
 unit+=s[s.index('#define COVER_CACHE_MAGIC'):s.index('static uint64_t cover_hash')]
 unit+=s[s.index('#define FAST_COVER_REVISION'):s.index('static uint64_t fast_cover_checksum')]
-for n in ('cover_hash','cover_cache_key','fast_cover_checksum','fast_cover_key','book_cover_fast_cache_read','book_cover_fast_cache_write'):
+for n in ('cover_hash','cover_cache_key','fast_cover_checksum','fast_cover_key','book_cover_fast_cache_read','fast_cache_write','book_cover_fast_cache_write','book_cover_fast_cache_write_checked'):
  unit+=function(n,cover)+'\n'
 unit+=r'''
 #define MALLOC_CAP_SPIRAM 1
@@ -80,6 +80,9 @@ int main(int argc,char **argv){
  changed=key;changed.width=120;changed.height=156;assert(!book_cover_fast_cache_read(path,"name","author",changed,out,&edge));
  assert(!book_cover_fast_cache_read(path,"name","other author",key,out,&edge));
  char cache[120];fast_cover_header_t h;assert(fast_cover_key(path,"name","author",key,cache,&h));
+ uint8_t stale[4494];memset(stale,0,sizeof(stale));
+ book_cover_fast_cache_write_checked(path,"name","author",key,stale,false,(int64_t)h.source.file_size+1,h.source.modified);
+ assert(book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!memcmp(out,bits,4494));
  FILE *f=fopen(cache,"r+b");assert(f&&fseek(f,sizeof(h)+8,SEEK_SET)==0);int byte=fgetc(f);fseek(f,-1,SEEK_CUR);assert(fputc(byte^1,f)!=EOF);fclose(f);
  assert(!book_cover_fast_cache_read(path,"name","author",key,out,&edge)&&!load_shelf_cover_fast(0,0)&&!live);
  book_cover_fast_cache_write(path,"name","author",key,bits,true);assert(load_shelf_cover_fast(0,0));
