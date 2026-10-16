@@ -72,6 +72,7 @@ void read_pico_epd_set_pclk(int mhz) {assert(mhz == DISPLAY_PCLK_SAFE_MHZ);}
 void read_pico_epd_use_scan(read_pico_epd_scan_t mode) {scan = mode;}
 void epd_lcd_set_prefill_lines(int lines) {prefill = lines;}
 void epd_poweron(void) {}
+bool read_pico_epd_release_drive(void) {return true;}
 void epd_poweroff(void) {}
 void epd_clear(void) { assert(ota_display_depth);++clears; memset(panel, 255, BYTES);}
 void epd_hl_set_all_white(EpdiyHighlevelState* state) {memset(state->front_fb, 255, BYTES);}

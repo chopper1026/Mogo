@@ -40,6 +40,7 @@ extern "C" {
 #define DISPLAY_PCLK_MAX_MHZ READ_PICO_EPD_PCLK_MAX_MHZ
 #define DISPLAY_PCLK_STEP_MHZ 1
 
+/// 保留高压轨并释放像素驱动，包括无变化刷新；不增加扫描。/ Retain HV rails and release pixel drive, including no-change updates, without another scan.
 void rails_keepalive(void);
 void rails_idle_check(int64_t now_ms);
 

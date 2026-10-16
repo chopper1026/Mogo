@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 修复无变化差分或异常返回后像素驱动可能保持开启的问题：结束时统一释放驱动，短暂 I2C 失败有界重试，避免静止白底持续受驱动；不增加刷新或改变波形、电压与画质。
+  Release pixel drive after unchanged differentials or failed output, retrying transient I2C errors without extra scans or changes to waveforms, voltage settings or image quality.
 - 阅读「自动全刷」（每 5/10/15/30 页）改用与顶部下拉快捷全刷、阅读页手动全刷完全相同的整屏 GC16，不再先整屏黑白盲擦再从白底重绘：清理时黑闪由多轮减为一次，停顿也更短。清屏页此后由 GC16 成像，不再复用普通翻页的文字梯子；插图、混排与工具栏打开时的清理行为不变。
   The reader's automatic cleanup (every 5/10/15/30 pages) now uses the same whole-screen GC16 as the quick-panel and manual full refresh instead of a blind erase plus from-white redraw: one flash instead of several, with a shorter pause. The cleanup page is now imaged by GC16 rather than the ordinary turn's text ladder; image, mixed and toolbar-open cases are unchanged.
 - 自动对时统一为每 6 小时一次：已联网（传书页/升级）时直接复用当前连接，不再额外每小时校准；设置页「上次对时」恢复随每次成功对时更新。

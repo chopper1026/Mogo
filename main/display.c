@@ -20,6 +20,7 @@
  */
 
 #include "display.h"
+#include "read_pico_board.h"
 #include "ota_online.h"
 #include "continuous_du.h"
 
@@ -49,26 +50,41 @@ void display_set_bulk_io(bool active) {
     ESP_LOGI(TAG, "bulk I/O scan margin %s", active ? "on" : "off");
 }
 
-// HV 轨道空闲多久才断电。断电要等 500ms 放电，再上电又要几十毫秒，
-// 所以连续操作期间一直保持常开，只有真的没人动才关掉省电并卸掉 VCOM。
-// How long HV rails stay up when idle. Power-off waits 500 ms to discharge,
-// and power-on takes tens of ms, so keep them on during a burst of work and
-// drop them — and VCOM — only when nothing is happening.
+// 高压轨在连续操作间保留8秒，避免反复500ms放电；像素驱动在每轮结束时立即释放。
+// Keep HV rails for an eight-second burst to avoid repeated 500ms discharge; release pixel drive after every output.
 #define RAILS_IDLE_TIMEOUT_MS 8000
 
 // 0 表示轨道已断电；否则是到期时间（ms），到点后主循环断电。
 // 0 means the rails are off; otherwise a deadline (ms) after which the loop powers them down.
 static int64_t rails_deadline_ms;
+static int64_t drive_release_retry_ms;
 
 void rails_keepalive(void) {
-    rails_deadline_ms = esp_timer_get_time() / 1000 + RAILS_IDLE_TIMEOUT_MS;
+    bool held = pico_online_display_begin();
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    // 包括无变化和失败返回：释放像素驱动，不增加扫描或全刷。
+    // Release pixel drive even after unchanged/failed output, without another scan or full refresh.
+    drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
+    rails_deadline_ms = now_ms + RAILS_IDLE_TIMEOUT_MS;
+    pico_online_display_end(held);
 }
 
 void rails_idle_check(int64_t now_ms) {
+    if (!(drive_release_retry_ms && now_ms >= drive_release_retry_ms) &&
+        !(rails_deadline_ms && now_ms >= rails_deadline_ms)) return;
+    // 和实际推屏共用递归锁，不能在另一轮扫描中途释放驱动。
+    // Share the scan's recursive lock; never release drive during another output.
+    bool held = pico_online_display_begin();
+    // 短暂 I2C 故障按50ms重试；成功后不再访问总线，也不重画页面。
+    // Retry a transient I2C failure at 50ms intervals; stop bus access on success without repainting.
+    if (drive_release_retry_ms && now_ms >= drive_release_retry_ms)
+        drive_release_retry_ms = read_pico_epd_release_drive() ? 0 : now_ms + 50;
     if (rails_deadline_ms != 0 && now_ms >= rails_deadline_ms) {
         rails_deadline_ms = 0;
+        drive_release_retry_ms = 0;
         epd_poweroff();
     }
+    pico_online_display_end(held);
 }
 
 // 20 相完整/原厂 DU 按厂家时序走 FULL；只有触摸笔迹用的 8 帧跟随 DU 走 FAST。

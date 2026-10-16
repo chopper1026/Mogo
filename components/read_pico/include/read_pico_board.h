@@ -91,6 +91,9 @@ esp_err_t read_pico_sd_detect(bool* present);
 /// / Convenience detection returns false on I/O failure; mounting and removal use checked detect.
 bool read_pico_sd_present(void);
 bool read_pico_rails_on(void);
+/// 刷新结束后释放 MODE/XOE/VCOM_EN，保留高压轨与原电压；已经中性时不访问 I2C，失败返回 false 供重试。
+/// Release MODE/XOE/VCOM_EN after output, retaining HV rails and voltage settings; neutral state does no I2C, false requests a retry.
+bool read_pico_epd_release_drive(void);
 
 /// 翻转 VCOMCTL：1=外部 VCOM_EN，0=自动时序。
 /// / Toggle VCOMCTL: 1=external VCOM_EN, 0=auto timing.
