@@ -2855,9 +2855,13 @@ static void draw_reader_images(uint8_t *fb, size_t page, EpdRect body) {
         }
     }
 }
+// 只补画外框：进来的帧缓冲里已经有正文（整页重绘是 draw_reader 先清再画，预绘命中是整帧拷来的）。
+// 这里再清一次会把刚画好的正文整块擦掉，页面上就只剩页眉、页脚和状态栏。
+// Chrome only: the incoming frame already holds the body (draw_reader clears and paints it first;
+// a prefetch hit copies the whole frame in). Clearing here again would erase the fresh body text and
+// leave nothing on the page but the header, footer and status bar.
 static void draw_reader_outer(uint8_t *fb,size_t page) {
     ui_text_set_system_scale(false);
-    ui_clear_page(fb);
     if (app_settings_reader_statusbar()) ui_nav_status(fb);
     if (!s_reader_fullscreen) draw_reader_header(fb);
     EpdRect body=body_rect();
