@@ -37,6 +37,7 @@ python3 tools/boot_recovery_host_test.py
 build/book-tests/boot-state
 bash tools/run_text_input_host_tests.sh
 python3 tools/reader_images_host_test.py
+python3 tools/reader_title_style_host_test.py
 python3 tools/book_layout_draw_host_test.py
 python3 tools/reader_body_paint_host_test.py
 python3 tools/ui_font_coverage_host_test.py

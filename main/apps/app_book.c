@@ -179,6 +179,10 @@
 #define BOOK_FONT_PAGE 9
 #define BOOKMARK_MAX 24
 #define BOOKMARK_ROWS 6
+// 横排章节题头的整块高度：绘制与排版预留共用，样式只改绘制、不改这里。
+// Height of the horizontal chapter heading band, shared by painting and the layout reservation:
+// a style changes the painting only, never this height.
+#define READER_HEADING_BAND_HEIGHT 214
 
 typedef enum { SHELF, READING, TOC, MANAGE, BULK, IMPORT, SEARCH, EDIT } book_view_t;
 typedef enum {
@@ -198,6 +202,7 @@ typedef enum {
     READER_PANEL_TURN_SETTINGS,
     READER_PANEL_KEY_SETTINGS,
     READER_PANEL_KEY_PICKER,
+    READER_PANEL_TITLE_STYLE,
 } reader_panel_t;
 typedef struct {
     char name[256];
@@ -404,6 +409,9 @@ static int s_next_page = -1, s_prep_page = -1;
 static void render(app_ctx_t* ctx, uint8_t* fb);
 static void draw_reader_panel(uint8_t* fb);
 static EpdRect reader_slider_rect(int slider);
+static const char* reader_title_style_name(int style);
+static void draw_reader_title_style(uint8_t *fb, EpdRect band, int style,
+                                    const char *label_sample, const char *title_sample);
 static void scan_shelf(app_ctx_t* ctx);
 static void copy_text(char* dst, size_t cap, const char* src);
 static void fit_text(char* text, int px, int width);
@@ -2213,12 +2221,23 @@ static void draw_rule_settings(uint8_t *fb) {
     reader_panel_text_vc(fb, 342, 1149, 23, "返回字体设置", EPD_DRAW_ALIGN_CENTER, true);
 }
 
+// 排版设置面板顶：为「标题样式」多让出一行，面板整体高了 80，原来的各行整体上移 80。
+// Layout sheet top: one more row for the heading style means the sheet rises 80 px and every
+// existing row moves up by the same 80.
+#define READER_LAYOUT_SHEET_TOP 420
+
+// 「标题样式」入口行：与相邻控件同高的一行，右侧给当前样式名和右箭头。
+// The heading-style entry row: one row of the same height as its neighbours, with the current
+// style name and a chevron on the right.
+static EpdRect title_style_entry_rect(void) { return (EpdRect){36, 1050, 612, 66}; }
+
+static EpdRect indent_choice_rect(int index) { return (EpdRect){214 + index * 108, 890, 100, 64}; }
 static EpdRect indent_adjust_rect(int index) {
-    const EpdRect controls[] = {{214,1050,100,64}, {322,1050,208,64}, {538,1050,100,64}};
+    const EpdRect controls[] = {{214,970,100,64}, {322,970,208,64}, {538,970,100,64}};
     return controls[index];
 }
 static void draw_layout_settings(uint8_t* fb) {
-    const int top = 500;
+    const int top = READER_LAYOUT_SHEET_TOP;
     draw_sheet(fb, top, "排版设置");
     draw_sheet_back(fb, top);
     int shown_margin = s_reader_slider >= 0 ? s_reader_preview_margin : s_margin;
@@ -2235,23 +2254,23 @@ static void draw_layout_settings(uint8_t* fb) {
     if (line_i < 0) line_i = 0;
     if (line_i > 40) line_i = 40;
     draw_pill_slider(fb, reader_slider_rect(2), "紧", "松", "行距", line_i, 41, 21, 21);
-    reader_panel_text(fb, 42, 715, 21, "段距", EPD_DRAW_ALIGN_LEFT, false);
+    reader_panel_text(fb, 42, 635, 21, "段距", EPD_DRAW_ALIGN_LEFT, false);
     char value[16]; snprintf(value, sizeof(value), "%d%%", shown_para);
     draw_pill_slider(fb, reader_slider_rect(3), "紧", "松", value, shown_para / 25, 4, 21, 21);
-    reader_panel_text(fb, 42, 835, 21, "字间距", EPD_DRAW_ALIGN_LEFT, false);
+    reader_panel_text(fb, 42, 755, 21, "字间距", EPD_DRAW_ALIGN_LEFT, false);
     static const char* track_names[] = {"-4", "-2", "默认", "+2", "+4"};
     draw_pill_slider(fb, reader_slider_rect(4), "紧", "松", track_names[shown_tracking], shown_tracking, 5, 21, 21);
-    ui_text_box(fb,(EpdRect){42,970,154,64},24,"首行缩进",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){42,890,154,64},24,"首行缩进",EPD_DRAW_ALIGN_LEFT,false);
     static const char* indent_names[] = {"无", "1字", "2字", "3字"};
     int indent = app_settings_book_indent();
     for (int i = 0; i < 4; ++i) {
-        EpdRect choice = {214 + i * 108, 970, 100, 64};
+        EpdRect choice = indent_choice_rect(i);
         bool selected = i == indent;
         ui_fill_round_rect(fb, choice, 16, selected ? UI_GRAY_BLACK : 0xe4);
         ui_draw_control_frame(fb, choice, 16, selected ? UI_GRAY_BLACK : 0x98);
         ui_text_box(fb,(EpdRect){choice.x+8,choice.y+5,choice.width-16,choice.height-10},23,indent_names[i],EPD_DRAW_ALIGN_CENTER,selected);
     }
-    ui_text_box(fb,(EpdRect){42,1050,154,64},24,"缩进微调",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){42,970,154,64},24,"缩进微调",EPD_DRAW_ALIGN_LEFT,false);
     char adjustment[28]; snprintf(adjustment, sizeof(adjustment), "%+d px · 复位", app_settings_book_indent_adjust());
     const char *labels[] = {"−", adjustment, "+"};
     for (int i = 0; i < 3; ++i) {
@@ -2260,6 +2279,15 @@ static void draw_layout_settings(uint8_t* fb) {
         ui_draw_control_frame(fb, control, 16, 0x50);
         ui_text_box(fb,(EpdRect){control.x+8,control.y+5,control.width-16,control.height-10},i==1?22:31,labels[i],EPD_DRAW_ALIGN_CENTER,false);
     }
+    // 与字体页的设置卡片同款：白底细框，左标签、右当前值、右箭头。
+    // Same card as the font sheet's settings rows: white fill, light frame, label left, value right.
+    EpdRect style_row = title_style_entry_rect();
+    ui_fill_round_rect(fb, style_row, 20, UI_GRAY_WHITE);
+    ui_draw_control_frame(fb, style_row, 20, 0x70);
+    ui_text_box(fb,(EpdRect){style_row.x+22,style_row.y+10,160,style_row.height-20},25,"标题样式",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){style_row.x+182,style_row.y+10,style_row.width-234,style_row.height-20},25,
+                reader_title_style_name(app_settings_book_title_style()),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb,style_row.x+style_row.width-24,style_row.y+style_row.height/2,27,UI_ICON_CHEVRON_RIGHT,0x38);
     EpdRect back = {36, 1132, 612, 72};
     ui_fill_round_rect(fb, back, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1168, 24, "返回字体设置", EPD_DRAW_ALIGN_CENTER, true);
@@ -2438,6 +2466,84 @@ static void draw_key_picker(uint8_t *fb) {
     reader_panel_text_vc(fb, 342, 1112, 20, s_reader_key_error[0] ? s_reader_key_error : "从底部上滑可随时打开阅读工具栏", EPD_DRAW_ALIGN_CENTER, false);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "返回", EPD_DRAW_ALIGN_CENTER, true);
+}
+
+/* ---- 标题样式选择面板 / Heading style picker ---- */
+// 卡片里贴的是真实题头带 [y+4, y+176] 的 1:1 结果：四种样式的内容都落在这 172 像素里
+// （最上沿是边框索引的框顶 y+10，最下沿是静页余白的细线 y+175）。
+// A card holds the real heading band's [y+4, y+176] window at 1:1: every style fits in those 172
+// pixels, the frame's y+10 being the topmost art and the plain hairline at y+175 the lowest.
+#define TITLE_STYLE_SHEET_TOP 130
+#define TITLE_STYLE_CARD_TOP 262
+#define TITLE_STYLE_CARD_PITCH 214
+#define TITLE_STYLE_CARD_HEIGHT 206
+#define TITLE_STYLE_WINDOW_TOP 30
+#define TITLE_STYLE_WINDOW_HEIGHT 176
+#define TITLE_STYLE_BAND_WINDOW_TOP 4
+
+static const char* const s_title_style_names[] = {"中央章徽", "边框索引", "左锋题签", "静页余白"};
+static const char* const s_title_style_details[] = {
+    "胶囊式章节序号居中悬于章名上方",
+    "完整细框搭配主题色粗边，结构清晰醒目",
+    "左对齐标题，以主题色竖线强调",
+    "极简居中标题，以细线收束留白",
+};
+static const char* reader_title_style_name(int style) {
+    return style >= 0 && style < APP_BOOK_TITLE_STYLE_COUNT ? s_title_style_names[style] : "";
+}
+static EpdRect title_style_card_rect(int index) {
+    return (EpdRect){36, TITLE_STYLE_CARD_TOP + index * TITLE_STYLE_CARD_PITCH,
+                     612, TITLE_STYLE_CARD_HEIGHT};
+}
+static EpdRect title_style_window_rect(int index) {
+    EpdRect card = title_style_card_rect(index);
+    return (EpdRect){card.x, card.y + TITLE_STYLE_WINDOW_TOP, card.width, TITLE_STYLE_WINDOW_HEIGHT};
+}
+// 卡片上方那行说明：没有横排题头的书先说清楚，其余时候显示选中样式的描述。
+// The line above the cards: a book without a horizontal heading says so, otherwise the selected
+// style's description.
+static const char* title_style_note(void) {
+    if (book_kind() != BOOK_KIND_EPUB) return "当前书籍没有章节题头，样式对 EPUB 生效";
+    if (app_settings_book_vertical()) return "竖排沿用两列题头，样式对横排生效";
+    return s_title_style_details[app_settings_book_title_style()];
+}
+// 预览文案优先用当前章的编号与章名，没有题头时退回样本。
+// Previews prefer the current chapter's label and title and fall back to the sample.
+static const char* title_style_preview_label(void) {
+    return s_chapter_heading_label[0] ? s_chapter_heading_label : "第十二章";
+}
+static const char* title_style_preview_title(void) {
+    return s_chapter_heading_title[0] ? s_chapter_heading_title : "远方来信";
+}
+static void draw_title_style_picker(uint8_t* fb) {
+    draw_sheet(fb, TITLE_STYLE_SHEET_TOP, "标题样式");
+    draw_sheet_back(fb, TITLE_STYLE_SHEET_TOP);
+    ui_text_box(fb,(EpdRect){36,TITLE_STYLE_SHEET_TOP+96,612,30},19,title_style_note(),EPD_DRAW_ALIGN_CENTER,false);
+    int selected = app_settings_book_title_style();
+    for (int i = 0; i < APP_BOOK_TITLE_STYLE_COUNT; ++i) {
+        EpdRect card = title_style_card_rect(i);
+        bool active = i == selected;
+        // 卡片底 → 预览窗底 → 内容 → 卡片边框：白色预览窗铺到卡片边缘，边框必须最后画，
+        // 否则底边与左右两边会被它擦掉，卡片看着像开口的。
+        // Card fill, window fill, content, then the card frame: the white window reaches the card's
+        // edge, so the frame has to come last or the bottom and side borders are erased.
+        ui_fill_round_rect(fb, card, 20, active ? 0xe6 : 0xf2);
+        EpdRect window = title_style_window_rect(i);
+        ui_fill_rect_fast(window, UI_GRAY_WHITE, fb);
+        ui_hairline(fb, window.y, window.x, window.width, 0xb0);
+        ui_text_box(fb,(EpdRect){card.x+16,card.y+2,card.width-60,28},21,s_title_style_names[i],EPD_DRAW_ALIGN_LEFT,false);
+        if (active) epd_fill_circle(card.x+card.width-27,card.y+16,7,UI_GRAY_BLACK,fb);
+        // 窗口里就是真题头：把题头带摆到窗口对应的位置，用同一支绘制函数画一次。
+        // The window holds the real heading: place the band where the window looks and paint it with
+        // the same function the reader uses.
+        draw_reader_title_style(fb, (EpdRect){window.x, window.y - TITLE_STYLE_BAND_WINDOW_TOP,
+                                              window.width, READER_HEADING_BAND_HEIGHT},
+                                i, title_style_preview_label(), title_style_preview_title());
+        ui_draw_control_frame(fb, card, 20, active ? UI_GRAY_BLACK : 0x88);
+        if (active) ui_draw_control_frame(fb,(EpdRect){card.x+1,card.y+1,card.width-2,card.height-2},19,UI_GRAY_BLACK);
+    }
+    ui_fill_round_rect(fb,(EpdRect){36,1126,612,58},20,UI_GRAY_BLACK);
+    reader_panel_text_vc(fb,342,1155,24,"返回字体设置",EPD_DRAW_ALIGN_CENTER,true);
 }
 
 static int reader_font_picker_top(void) { return app_settings_system_font_size()>=150?270:584; }
@@ -2651,6 +2757,7 @@ static void draw_reader_panel(uint8_t* fb) {
     else if (s_reader_panel == READER_PANEL_TURN_SETTINGS) draw_turn_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_SETTINGS) draw_key_settings(fb);
     else if (s_reader_panel == READER_PANEL_KEY_PICKER) draw_key_picker(fb);
+    else if (s_reader_panel == READER_PANEL_TITLE_STYLE) draw_title_style_picker(fb);
     ui_text_set_system_scale(false);
 }
 
@@ -2753,6 +2860,129 @@ static void draw_vertical_heading(uint8_t *fb, EpdRect body) {
     if (metrics.label_px)
         ttf_draw_text_px_vertical(fb, metrics.label_x, y, metrics.label_px, s_chapter_heading_label, 0, 0, 15);
     ttf_draw_text_px_vertical(fb, metrics.title_x, y, metrics.title_px, s_chapter_heading_title, 0, 0, 15);
+}
+
+/* ---- 横排题头样式 / Horizontal heading styles ---- */
+// 四种样式共用同一块题头带：带高即排版预留的高度，所以换样式只重画首页题头，不重排整章。
+// 新增样式必须留在带内（约 y+4..y+180），越界会压到正文上。
+// All four styles share one band, and the band height is exactly what the layout reserves, so
+// switching a style repaints the first page instead of re-typesetting the chapter. A new style has
+// to stay inside the band, roughly y+4..y+180, or it lands on the body text.
+static EpdRect reader_heading_band(int top) {
+    return (EpdRect){36, top, UI_LOCK_WIDTH - 72, READER_HEADING_BAND_HEIGHT};
+}
+
+// 题头文字按目标字号截短到给定宽度，返回实际字号；样本用原串，截短只影响画出来的那份。
+// Fit a heading line into the given width, returning the size used; the sample stays the original
+// string so only the painted copy is shortened.
+static int reader_heading_fit(char *out, size_t cap, const char *sample, int px, int width) {
+    copy_text(out, cap, sample ? sample : "");
+    return ui_text_title_fit(out, px, width, sample ? sample : "");
+}
+
+// 静页余白：编号在上、章名在下、细线收尾，横排题头的历史画法。
+// Plain: label above, title below, a hairline to close the block, the historical horizontal heading.
+static void draw_heading_plain(uint8_t *fb, EpdRect band, int text_x, int title_px, int label_px,
+                               const char *title, const char *title_sample,
+                               const char *label, const char *label_sample) {
+    ui_text_title_vc(fb, text_x, band.y + 29, label_px, label, label_sample, EPD_DRAW_ALIGN_CENTER);
+    ui_text_title_vc(fb, text_x, band.y + 112, title_px, title, title_sample, EPD_DRAW_ALIGN_CENTER);
+    ui_hairline(fb, band.y + 174, band.x + (band.width - 264) / 2, 264, UI_GRAY_LIGHT);
+}
+
+// 中央章徽：编号落在实心胶囊里居中悬于章名上方；没有编号时只剩居中的章名。
+// Emblem: the label sits in a solid pill above the centred title, and a book without a label simply
+// keeps the centred title.
+static void draw_heading_emblem(uint8_t *fb, EpdRect band, int text_x, int title_px,
+                                const char *title, const char *title_sample,
+                                const char *label, const char *label_sample) {
+    const bool has_label = label && label[0];
+    // 胶囊要按字宽包住编号，所以这里重新量一次：宽度和字号出自同一次测量，底和字不会错开。
+    // The pill has to wrap the label by its width, so measure here: width and size come from one
+    // measurement, and the pill cannot drift from the text inside it.
+    if (has_label) {
+        int pill_px = 0;
+        const int text_w = ui_text_title_measure(24, label, label_sample, &pill_px);
+        const int pill_h = 54;
+        const int pill_w = text_w + 44;
+        ui_fill_round_rect(fb, (EpdRect){text_x - pill_w / 2, band.y + 52 - pill_h / 2, pill_w, pill_h},
+                           pill_h / 2, UI_GRAY_BLACK);
+        ui_text_title_ink_vc(fb, text_x, band.y + 52, pill_px, label, label_sample,
+                             EPD_DRAW_ALIGN_CENTER, UI_INK_WHITE, UI_INK_BLACK);
+    }
+    ui_text_title_vc(fb, text_x, band.y + (has_label ? 140 : 107), title_px, title, title_sample,
+                     EPD_DRAW_ALIGN_CENTER);
+}
+
+// 边框索引：细框加左侧粗边，编号与章名都在框内左对齐。
+// Frame: a hairline box with a heavy left edge, label and title both left aligned inside it.
+static void draw_heading_frame(uint8_t *fb, EpdRect band, int text_x, int title_px, int label_px,
+                               const char *title, const char *title_sample,
+                               const char *label, const char *label_sample) {
+    const bool has_label = label && label[0];
+    EpdRect box = {band.x + 24, band.y + 10, band.width - 48, 162};
+    ui_fill_round_rect(fb, box, 14, UI_GRAY_WHITE);
+    ui_draw_control_frame(fb, box, 14, UI_GRAY_BLACK);
+    ui_draw_control_frame(fb, (EpdRect){box.x + 1, box.y + 1, box.width - 2, box.height - 2}, 13, UI_GRAY_BLACK);
+    ui_fill_round_rect(fb, (EpdRect){box.x + 2, box.y + 2, 14, box.height - 4}, 7, UI_GRAY_BLACK);
+    if (has_label)
+        ui_text_title_vc(fb, text_x, box.y + 42, label_px, label, label_sample, EPD_DRAW_ALIGN_LEFT);
+    ui_text_title_vc(fb, text_x, has_label ? box.y + 130 : box.y + box.height / 2, title_px, title,
+                     title_sample, EPD_DRAW_ALIGN_LEFT);
+}
+
+// 左锋题签：左侧一道竖线，编号与章名左对齐紧随其后。
+// 竖线是直角矩形，且比文字块更长，下端垂到章名下面；下沿与边框索引的框底同在 y+172。
+// Mark: a square-ended vertical bar on the left with the label and title left aligned beside it.
+// The bar is longer than the text block and hangs below the title; its foot matches the frame
+// style's box bottom at y+172.
+static void draw_heading_mark(uint8_t *fb, EpdRect band, int text_x, int title_px, int label_px,
+                              const char *title, const char *title_sample,
+                              const char *label, const char *label_sample) {
+    const bool has_label = label && label[0];
+    const int bar_h = has_label ? 146 : 96;
+    const int bar_y = has_label ? band.y + 26 : band.y + 59;
+    ui_fill_rect_fast((EpdRect){band.x + 16, bar_y, 8, bar_h}, UI_GRAY_BLACK, fb);
+    if (has_label)
+        ui_text_title_vc(fb, text_x, band.y + 50, label_px, label, label_sample, EPD_DRAW_ALIGN_LEFT);
+    ui_text_title_vc(fb, text_x, has_label ? band.y + 136 : band.y + 107, title_px, title,
+                     title_sample, EPD_DRAW_ALIGN_LEFT);
+}
+
+// 题头带里画一次：左右对齐的样式用 text_x 当左边缘，居中样式当中心；字号与宽度在这里一次算准，
+// 绘制与截短不会各算一套。编号或章名缺失时各样式自己收窄。
+// Paint one heading inside the band: text_x is the left edge for the aligned styles and the centre
+// for the centred ones. Size and width are decided here once so fitting and painting cannot drift;
+// each style narrows itself when the label or the title is missing.
+static void draw_reader_title_style(uint8_t *fb, EpdRect band, int style,
+                                    const char *label_sample, const char *title_sample) {
+    if (!fb || !title_sample || !title_sample[0] || band.width <= 0) return;
+    if (style < 0 || style >= APP_BOOK_TITLE_STYLE_COUNT) style = APP_BOOK_TITLE_STYLE_PLAIN;
+    int text_x = band.x + band.width / 2, text_w = ui_content_width();
+    if (style == APP_BOOK_TITLE_STYLE_FRAME) {
+        text_x = band.x + 58;
+        text_w = band.width - 102;
+    } else if (style == APP_BOOK_TITLE_STYLE_MARK) {
+        text_x = band.x + 44;
+        text_w = band.width - 68;
+    }
+    char title[sizeof(s_chapter_heading_title)], label[sizeof(s_chapter_heading_label)];
+    int title_px = reader_heading_fit(title, sizeof(title), title_sample, 48, text_w);
+    int label_px = reader_heading_fit(label, sizeof(label), label_sample, 24, text_w);
+    switch (style) {
+        case APP_BOOK_TITLE_STYLE_EMBLEM:
+            draw_heading_emblem(fb, band, text_x, title_px, title, title_sample, label, label_sample);
+            break;
+        case APP_BOOK_TITLE_STYLE_FRAME:
+            draw_heading_frame(fb, band, text_x, title_px, label_px, title, title_sample, label, label_sample);
+            break;
+        case APP_BOOK_TITLE_STYLE_MARK:
+            draw_heading_mark(fb, band, text_x, title_px, label_px, title, title_sample, label, label_sample);
+            break;
+        default:
+            draw_heading_plain(fb, band, text_x, title_px, label_px, title, title_sample, label, label_sample);
+            break;
+    }
 }
 
 // 重排前把章节题头的几何重新说给排版：竖排留右侧列宽、横排留顶部行高，
@@ -2875,15 +3105,12 @@ static void draw_reader_outer(uint8_t *fb,size_t page) {
             // continues to its left.
             draw_vertical_heading(fb, body);
         } else {
-            char heading[128]; copy_text(heading, sizeof(heading), s_chapter_heading_title);
-            int heading_px = ui_text_title_fit(heading, 48, ui_content_width(), s_chapter_heading_title);
-            char label[sizeof(s_chapter_heading_label)]; copy_text(label, sizeof(label), s_chapter_heading_label);
-            int label_px = ui_text_title_fit(label, 24, ui_content_width(), s_chapter_heading_label);
-            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 29, label_px, label,
-                              s_chapter_heading_label, EPD_DRAW_ALIGN_CENTER);
-            ui_text_title_vc(fb, UI_LOCK_WIDTH / 2, body.y + 112, heading_px, heading,
-                              s_chapter_heading_title, EPD_DRAW_ALIGN_CENTER);
-            ui_hairline(fb, body.y + 174, 210, 264, UI_GRAY_LIGHT);
+            // 样式来自阅读设置的「标题样式」：只改这一句，绘制与排版预留仍然同源。
+            // The style comes from the reader's heading-style setting, so wiring it changes this one
+            // argument while painting stays tied to the reservation.
+            draw_reader_title_style(fb, reader_heading_band(body.y),
+                                    (int)app_settings_book_title_style(),
+                                    s_chapter_heading_label, s_chapter_heading_title);
         }
     }
     if (s_reader_panel != READER_PANEL_BACKGROUND_PREVIEW)
@@ -3583,7 +3810,8 @@ static bool load_chapter_at(app_ctx_t* ctx, size_t chapter, size_t offset,
             lead_skip = 0;
             lead_height = 0;
         } else {
-            lead_height = body_rect().height > 214 ? 214 : 0;
+            lead_height = body_rect().height > READER_HEADING_BAND_HEIGHT
+                ? READER_HEADING_BAND_HEIGHT : 0;
         }
     }
     size_t old_lead_skip = s_chapter_lead_skip;
@@ -4748,11 +4976,13 @@ static int reader_margin_input(EpdRect rect, int x, int current, int px, int tra
 
 static EpdRect reader_slider_rect(int slider) {
     // 字号滑杆在双列字体卡片上方，绘制与拖动共用位置。/ The size rail sits above the paired cards; paint and drag share its position.
+    // 1..4 属排版设置面板：面板顶抬高 80 后整体上移同样距离。
+    // Rails 1..4 belong to the layout sheet and moved up with its raised top.
     if (slider == 0) return (EpdRect){36,700-reader_ui_extra(112),612,76};
-    if (slider == 1) return (EpdRect){36, 620, 294, 66};
-    if (slider == 2) return (EpdRect){354, 620, 294, 66};
-    if (slider == 3) return (EpdRect){36, 740, 612, 66};
-    return (EpdRect){36, 860, 612, 66};
+    if (slider == 1) return (EpdRect){36, 540, 294, 66};
+    if (slider == 2) return (EpdRect){354, 540, 294, 66};
+    if (slider == 3) return (EpdRect){36, 660, 612, 66};
+    return (EpdRect){36, 780, 612, 66};
 }
 
 static int reader_slider_at(uint16_t x, uint16_t y) {
@@ -5099,7 +5329,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return APP_REDRAW_PAGE;
     }
     if (s_reader_panel == READER_PANEL_LAYOUT_SETTINGS) {
-        const int top = 500;
+        const int top = READER_LAYOUT_SHEET_TOP;
         EpdRect back_icon = {36, top + 29, 56, 56};
         EpdRect back_button = {36, 1132, 612, 72};
         if (ui_rect_hit(back_icon, x, y) || ui_rect_hit(back_button, x, y)) {
@@ -5128,8 +5358,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         if (ui_rect_hit(tracking, x, y))
             return apply_reader_typography(ctx, slider_index(tracking, x, 5));
         for (int i = 0; i < 4; ++i) {
-            EpdRect choice = {214 + i * 108, 970, 100, 64};
-            if (ui_rect_hit(choice, x, y)) return apply_reader_indent(ctx, i, app_settings_book_indent_adjust());
+            if (ui_rect_hit(indent_choice_rect(i), x, y))
+                return apply_reader_indent(ctx, i, app_settings_book_indent_adjust());
         }
         for (int i = 0; i < 3; ++i) {
             if (!ui_rect_hit(indent_adjust_rect(i), x, y)) continue;
@@ -5138,9 +5368,31 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
             if (adjustment > 20) adjustment = 20;
             return apply_reader_indent(ctx, app_settings_book_indent(), adjustment);
         }
+        if (ui_rect_hit(title_style_entry_rect(), x, y)) {
+            s_reader_slider = -1;
+            s_reader_panel = READER_PANEL_TITLE_STYLE;
+            return APP_REDRAW_PAGE;
+        }
         s_reader_panel = y < top ? READER_PANEL_NONE : READER_PANEL_FONT_SETTINGS;
         invalidate_prep();
         return APP_REDRAW_PAGE;
+    }
+    if (s_reader_panel == READER_PANEL_TITLE_STYLE) {
+        EpdRect back_icon = {32, TITLE_STYLE_SHEET_TOP + 25, 64, 64};
+        EpdRect back_button = {36, 1126, 612, 58};
+        if (y < TITLE_STYLE_SHEET_TOP || ui_rect_hit(back_icon, x, y) || ui_rect_hit(back_button, x, y)) {
+            s_reader_panel = READER_PANEL_LAYOUT_SETTINGS;
+            return APP_REDRAW_PAGE;
+        }
+        for (int i = 0; i < APP_BOOK_TITLE_STYLE_COUNT; ++i) {
+            if (!ui_rect_hit(title_style_card_rect(i), x, y)) continue;
+            // 样式只改首页题头的画法，不重排也不动预绘；收紧面板后重画当前页即可。
+            // A style only changes how the first page's heading is painted, so nothing is
+            // re-typeset and the prefetch stays; the next page repaint shows it.
+            app_settings_set_book_title_style((uint8_t)i);
+            return APP_REDRAW_PAGE;
+        }
+        return APP_REDRAW_NONE;
     }
     if (s_reader_panel == READER_PANEL_RULE_SETTINGS) {
         if (y < 729 || ui_rect_hit((EpdRect){36, 1113, 612, 72}, x, y)) {

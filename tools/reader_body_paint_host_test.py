@@ -63,6 +63,12 @@ static void ui_text_set_system_scale(bool on){(void)on;}
 static void ui_nav_status(uint8_t *fb){(void)fb;++chrome_calls;}
 static void draw_reader_header(uint8_t *fb){(void)fb;++chrome_calls;}
 static void draw_vertical_heading(uint8_t *fb,EpdRect body){(void)fb;(void)body;++chrome_calls;}
+// 题头带与样式编号按固件取值；这个测试只关心正文是否被外框擦掉。
+// Band and style index match the firmware; this test only checks the body surviving the chrome.
+enum {APP_BOOK_TITLE_STYLE_PLAIN=3};
+static unsigned app_settings_book_title_style(void){return APP_BOOK_TITLE_STYLE_PLAIN;}
+static EpdRect reader_heading_band(int top){return (EpdRect){36,top,612,214};}
+static void draw_reader_title_style(uint8_t *fb,EpdRect band,int style,const char *label,const char *title){(void)fb;(void)band;(void)style;(void)label;(void)title;++chrome_calls;}
 static void draw_reader_images(uint8_t *fb,size_t page,EpdRect body){(void)fb;(void)page;(void)body;}
 static void draw_reader_panel(uint8_t *fb){(void)fb;++chrome_calls;}
 static void ui_reader_background_paint(uint8_t *fb,EpdRect r,bool top){(void)fb;(void)r;(void)top;}

@@ -5,6 +5,8 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 未发布 / Unreleased
 
+- 阅读页新增「标题样式」：工具栏「字体设置 → 排版设置 → 标题样式」可选四款横排章节题头——中央章徽、边框索引、左锋题签、静页余白；选择面板里每款都用真实题头画 1:1 预览，点卡片即生效。默认「静页余白」与升级前的画面逐像素一致；样式只改章节首页题头的画法，换样式不重排、不跳页，竖排与没有章节题头的书不受影响。
+  The reader gains a heading style: Font settings → Layout → Heading style offers four horizontal chapter headings (centred emblem, framed index, left mark, plain quiet page) with a 1:1 preview of each real heading in the picker and immediate apply on tap. The plain default is pixel-identical to the pre-upgrade rendering, and a style only changes how the chapter's first-page heading is drawn: switching re-typesets nothing, jumps no pages, and leaves vertical text and books without a chapter heading untouched.
 - 修复无变化差分或异常返回后像素驱动可能保持开启的问题：结束时统一释放驱动，短暂 I2C 失败有界重试，避免静止白底持续受驱动；不增加刷新或改变波形、电压与画质。
   Release pixel drive after unchanged differentials or failed output, retrying transient I2C errors without extra scans or changes to waveforms, voltage settings or image quality.
 - 阅读「自动全刷」（每 5/10/15/30 页）改用与顶部下拉快捷全刷、阅读页手动全刷完全相同的整屏 GC16，不再先整屏黑白盲擦再从白底重绘：清理时黑闪由多轮减为一次，停顿也更短。清屏页此后由 GC16 成像，不再复用普通翻页的文字梯子；插图、混排与工具栏打开时的清理行为不变。

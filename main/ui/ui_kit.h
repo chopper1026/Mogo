@@ -156,6 +156,16 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
 /// Rasterize the active face directly with gray antialiasing at the target size, visually centered and independent of UI scaling.
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                       const char *font_sample, enum EpdFontFlags align);
+/// 标题字体测宽：与 ui_text_title_vc 同一字体，输出实际字号，供胶囊底、外框按字宽定位。
+/// Measure in the face ui_text_title_vc draws with, reporting the size actually used, so a pill
+/// or a box can wrap the text.
+int ui_text_title_measure(int preferred_px, const char *text, const char *font_sample, int *out_px);
+/// 标题字体按指定墨色与底色绘制（反白编号），字号规则与 ui_text_title_vc 一致。
+/// Draw in the title face with an explicit ink and paper color for an inverted label, keeping the
+/// same size rule as ui_text_title_vc.
+void ui_text_title_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                          const char *font_sample, enum EpdFontFlags align,
+                          uint8_t ink, uint8_t paper);
 void ui_text_bw(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted

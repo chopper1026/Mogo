@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# 中文：锁定题头样式的两条硬约束——四种样式都落在排版预留的题头带内；
+#      默认「静页余白」与历史渲染逐像素一致（老用户升级画面不变）。
+# English: Lock the two hard promises of the heading styles -- every style stays inside the band the
+# layout reserves, and the plain default is pixel-identical to the historical rendering so upgrading
+# changes nothing on screen.
+import re
+import struct
+import subprocess
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def function(name, path):
+    """切出单个函数体，注释与字符串先抹平，括号深度配平。"""
+    text = path.read_text()
+    scan = re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"', lambda m: ' ' * len(m[0]), text)
+    match = re.search(r'^(?:static )?(?:[A-Za-z_]\w*(?:\s+|\s*\*\s*))+?' + name + r'\([^;{}]*\)\s*\{',
+                      scan, re.M)
+    assert match, name
+    at, depth = match.end(), 1
+    while depth:
+        depth += (scan[at] == '{') - (scan[at] == '}')
+        at += 1
+    return text[match.start():at]
+
+
+book = ROOT / 'main/apps/app_book.c'
+kit = ROOT / 'main/ui/ui_kit.c'
+settings = ROOT / 'main/settings.h'
+source = book.read_text()
+
+# 样式表从真实源码取，序号与固件一致。
+# Take the style table from the real source so the indices cannot drift from the firmware.
+styles = re.search(r'typedef enum \{\s*APP_BOOK_TITLE_STYLE_EMBLEM.*?\} app_book_title_style_t;',
+                   settings.read_text(), re.S)
+assert styles, 'heading style enum'
+band = re.search(r'#define READER_HEADING_BAND_HEIGHT \d+', source)
+assert band, 'heading band height'
+band_height = int(band.group(0).split()[-1])
+
+with tempfile.TemporaryDirectory() as folder:
+    p = Path(folder)
+    (p / 'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
+    (p / 'esp_log.h').write_text('#pragma once\nstatic inline void host_log(const char *t,const char *f,...){(void)t;(void)f;}\n#define ESP_LOGI(...) host_log(__VA_ARGS__)\n#define ESP_LOGW(...) host_log(__VA_ARGS__)\n#define ESP_LOGE(...) host_log(__VA_ARGS__)\n')
+    (p / 'esp_timer.h').write_text('#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n')
+    (p / 'esp_heap_caps.h').write_text('#pragma once\n#include <stddef.h>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\nvoid *heap_caps_malloc(size_t,int);\nvoid *heap_caps_calloc(size_t,size_t,int);\nvoid heap_caps_free(void*);\nsize_t heap_caps_get_free_size(int);\nsize_t heap_caps_get_largest_free_block(int);\n')
+    (p / 'epdiy.h').write_text((ROOT / 'tools/ui_gesture_stubs/epdiy.h').read_text())
+    builtin = (ROOT / 'main/assets/builtin.ttf').read_bytes()
+    assets = '#include <stdint.h>\nconst uint8_t data[] asm("_binary_builtin_ttf_start")={' + ','.join(map(str, builtin)) + '};\n'
+    assets += f'asm(".globl _binary_builtin_ttf_end\\n.set _binary_builtin_ttf_end, _binary_builtin_ttf_start + {len(builtin)}");\n'
+    (p / 'assets.c').write_text(assets)
+
+    unit = r'''
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include "ttf_font.h"
+#include "epdiy.h"
+static struct {void *p;size_t bytes;} allocations[8192];
+static size_t live,capacity=8*1024*1024;
+void *heap_caps_malloc(size_t n,int caps){(void)caps;if(n>capacity-live)return NULL;void *v=malloc(n);if(!v)return NULL;for(int i=0;i<8192;++i)if(!allocations[i].p){allocations[i].p=v;allocations[i].bytes=n;live+=n;return v;}abort();}
+void *heap_caps_calloc(size_t n,size_t z,int caps){if(z&&n>SIZE_MAX/z)return NULL;void *v=heap_caps_malloc(n*z,caps);if(v)memset(v,0,n*z);return v;}
+void heap_caps_free(void *v){if(!v)return;for(int i=0;i<8192;++i)if(allocations[i].p==v){live-=allocations[i].bytes;allocations[i].p=NULL;free(v);return;}abort();}
+size_t heap_caps_get_free_size(int c){(void)c;return capacity-live;}
+size_t heap_caps_get_largest_free_block(int c){(void)c;return capacity-live;}
+void lock_pin_wipe(void *p,unsigned n){volatile uint8_t *b=p;while(n--)*b++=0;}
+static enum EpdRotation display_rotation=EPD_ROT_PORTRAIT;
+int epd_width(void){return 1216;}
+int epd_height(void){return 684;}
+int epd_rotated_display_width(void){return 684;}
+int epd_rotated_display_height(void){return 1216;}
+enum EpdRotation epd_get_rotation(void){return display_rotation;}
+typedef struct {uint16_t x,y;} Coord_xy;
+#define _swap_int(a,b) {int temp=a;a=b;b=temp;}
+#define UI_LOCK_WIDTH 684
+#define UI_LOCK_HEIGHT 1216
+#define UI_MARGIN 40
+#define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
+#define UI_GRAY_LIGHT 224
+#define UI_INK_BLACK 0
+#define UI_INK_WHITE 15
+// 宿主只走 TTF：内建位图字体分支换成同尺寸的真字体调用。
+// The host goes through the TTF only: builtin-bitmap branches are redirected to the real face.
+static bool title_uses_active_font(const char *s){(void)s;return false;}
+static bool ui_font_has_text(const char *s){(void)s;return true;}
+static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
+static int ui_font_text_width_px(int px,const char *s){return ttf_text_width_px(px,s);}
+static void ui_font_measure_line_px(int px,const char *s,int *above,int *below){ttf_measure_line_px(px,s,above,below);}
+static void ui_font_draw_text_px(uint8_t *fb,int x,int baseline,int px,const char *s,int align,uint8_t ink,uint8_t paper,bool aa){(void)aa;ttf_draw_text_px(fb,x,baseline,px,s,align,ink,paper);}
+static char s_chapter_heading_title[128],s_chapter_heading_label[32];
+uint8_t ui_contrast_gray(uint8_t gray);
+void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
+'''
+    for n in ('_rotate', 'epd_draw_pixel', 'epd_get_pixel', 'epd_draw_hline', 'epd_draw_vline',
+              'epd_fill_rect', 'epd_draw_circle', 'epd_fill_circle_helper', 'epd_fill_circle',
+              'epd_write_line', 'epd_draw_line'):
+        unit += function(n, ROOT / 'components/epdiy/src/epdiy.c') + '\n'
+    for n in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
+              'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width'):
+        unit += function(n, kit) + '\n'
+    for n in ('ui_text_title_fit', 'ui_text_title_vc', 'title_face_px', 'ui_text_title_measure',
+              'ui_text_title_ink_vc'):
+        unit += function(n, kit) + '\n'
+    unit += styles.group(0) + '\n'
+    unit += band.group(0) + '\n'
+    for n in ('copy_text', 'reader_heading_band', 'reader_heading_fit', 'draw_heading_plain',
+              'draw_heading_emblem', 'draw_heading_frame', 'draw_heading_mark',
+              'draw_reader_title_style'):
+        unit += function(n, book) + '\n'
+    unit += r'''
+uint8_t ui_contrast_gray(uint8_t gray){return gray;}
+void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer){epd_fill_rect(rect,gray,framebuffer);}
+// 改样式之前 draw_reader_outer 里那段横排题头：默认样式必须与它逐像素一致。
+// The inline horizontal heading draw_reader_outer used before styles existed: the default style has
+// to match it pixel for pixel.
+static void historical_plain(uint8_t *fb,EpdRect body){
+    char heading[128];copy_text(heading,sizeof(heading),s_chapter_heading_title);
+    int heading_px=ui_text_title_fit(heading,48,ui_content_width(),s_chapter_heading_title);
+    char label[sizeof(s_chapter_heading_label)];copy_text(label,sizeof(label),s_chapter_heading_label);
+    int label_px=ui_text_title_fit(label,24,ui_content_width(),s_chapter_heading_label);
+    ui_text_title_vc(fb,UI_LOCK_WIDTH/2,body.y+29,label_px,label,s_chapter_heading_label,EPD_DRAW_ALIGN_CENTER);
+    ui_text_title_vc(fb,UI_LOCK_WIDTH/2,body.y+112,heading_px,heading,s_chapter_heading_title,EPD_DRAW_ALIGN_CENTER);
+    ui_hairline(fb,body.y+174,210,264,UI_GRAY_LIGHT);
+}
+static const size_t FB_BYTES=(size_t)UI_LOCK_WIDTH*UI_LOCK_HEIGHT/2;
+static uint8_t pixel_at(const uint8_t *frame,int x,int y){int px=x,py=y;switch(epd_get_rotation()){case EPD_ROT_PORTRAIT:px=epd_width()-y-1;py=x;break;case EPD_ROT_INVERTED_LANDSCAPE:px=epd_width()-x-1;py=epd_height()-y-1;break;case EPD_ROT_INVERTED_PORTRAIT:px=y;py=epd_height()-x-1;break;default:break;}return epd_get_pixel(px,py,epd_width(),epd_height(),frame);}
+// 墨迹范围：题头带内的最上、最下、最左、最右非白像素。
+// Ink extents: the topmost, lowest, leftmost and rightmost non-white pixel of the heading band.
+static void ink_bounds(const uint8_t *fb,int *top,int *bottom,int *left,int *right){
+    *top=INT32_MAX;*bottom=-1;*left=INT32_MAX;*right=-1;
+    for(int y=0;y<UI_LOCK_HEIGHT;++y)for(int x=0;x<UI_LOCK_WIDTH;++x)
+        if(pixel_at(fb,x,y)<15){
+            if(y<*top)*top=y;if(y>*bottom)*bottom=y;
+            if(x<*left)*left=x;if(x>*right)*right=x;
+        }
+}
+struct heading_case_t { const char *label; const char *title; };
+static const struct heading_case_t CASES[]={
+    {"第十二章","远方来信"},
+    {"","序章"},
+    {"第十二章","一个相当长的章节名称需要在带宽内截短之后再画出来"},
+    {"Chapter 12","The Long Way Home"},
+};
+int main(int argc,char **argv){
+    assert(argc==2);assert(ttf_font_open(argv[1])==ESP_OK);
+    uint8_t *styled=malloc(FB_BYTES),*plain=malloc(FB_BYTES);
+    assert(styled&&plain);
+    const EpdRect band=reader_heading_band(176);
+    assert(band.height==READER_HEADING_BAND_HEIGHT);
+    assert(band.height==214);
+    for(unsigned c=0;c<sizeof(CASES)/sizeof(CASES[0]);++c){
+        snprintf(s_chapter_heading_label,sizeof(s_chapter_heading_label),"%s",CASES[c].label);
+        snprintf(s_chapter_heading_title,sizeof(s_chapter_heading_title),"%s",CASES[c].title);
+        for(int style=0;style<APP_BOOK_TITLE_STYLE_COUNT;++style){
+            memset(styled,0xff,FB_BYTES);
+            draw_reader_title_style(styled,band,style,s_chapter_heading_label,s_chapter_heading_title);
+            int top,bottom,left,right;ink_bounds(styled,&top,&bottom,&left,&right);
+            assert(bottom>=0);
+            if(top<band.y+4||bottom>band.y+178||left<band.x||right>band.x+band.width){
+                fprintf(stderr,"style %d case %u out of band: y %d..%d x %d..%d\n",
+                        style,c,top,bottom,left,right);
+                assert(0);
+            }
+        }
+        // 默认样式与历史渲染必须一个像素都不差。
+        // The default style must not differ from the historical rendering by a single pixel.
+        memset(styled,0xff,FB_BYTES);
+        draw_reader_title_style(styled,band,APP_BOOK_TITLE_STYLE_PLAIN,s_chapter_heading_label,s_chapter_heading_title);
+        memset(plain,0xff,FB_BYTES);
+        historical_plain(plain,band);
+        assert(!memcmp(styled,plain,FB_BYTES));
+    }
+    printf("PASS: %u heading inputs x %d styles inside the %d px band; plain matches the historical rendering\n",
+           (unsigned)(sizeof(CASES)/sizeof(CASES[0])),APP_BOOK_TITLE_STYLE_COUNT,READER_HEADING_BAND_HEIGHT);
+    free(styled);free(plain);
+    return 0;
+}
+'''
+    (p / 'test.c').write_text(unit)
+    flags = ['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
+             '-isysroot', '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk',
+             '-I' + str(p), '-I' + str(ROOT / 'main/ui'), '-I' + str(ROOT / 'main/font'),
+             '-I' + str(ROOT / 'main')]
+    subprocess.run(flags + ['-c', str(ROOT / 'main/font/ttf_font.c'), '-o', str(p / 'ttf.o')], check=True)
+    subprocess.run(flags + [str(p / 'test.c'), str(p / 'assets.c'), str(p / 'ttf.o'),
+                            '-Wl,-dead_strip', '-lm', '-o', str(p / 'test')], check=True)
+    subprocess.run([str(p / 'test'), str((ROOT / 'main/assets/builtin.ttf').resolve())], check=True)

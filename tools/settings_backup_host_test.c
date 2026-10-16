@@ -21,6 +21,10 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
+/* v15..v19 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v19; legacy fixtures drop them all. */
+#define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + \
+                            sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -211,6 +215,7 @@ int main(void) {
     s_reader_power_turn = true;
     s_reader_statusbar = false; /* bit BK_IMMERSIVE saves 1 = hidden */
     app_settings_set_reader_open_fullscreen(false); /* v18 band remembers windowed entries */
+    app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_MARK); /* v19 band carries the heading style */
     s_shelf_style = 3;
     s_shutdown_style = APP_SHUTDOWN_STAGED;
     s_auto_lock_minutes = 5;
@@ -350,6 +355,7 @@ int main(void) {
            s_book_rule_offset == 7 && s_reader_full_pages == 5);
     assert(s_reader_turn_effect == 1 && s_reader_power_turn && !s_reader_statusbar && s_shelf_style == 2);
     assert(!app_settings_reader_open_fullscreen());
+    assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_MARK);
     assert(s_shutdown_style == APP_SHUTDOWN_STAGED && app_settings_auto_lock_minutes() == 5);
     assert(s_ble_turner);
     assert(s_reader_hold_refresh);
@@ -366,6 +372,48 @@ int main(void) {
     assert(app_settings_backup_save()==ESP_OK);
     app_settings_set_main_refresh_mode(APP_MAIN_REFRESH_NORMAL);
     assert(app_settings_backup_restore()==ESP_OK&&app_settings_main_fast_refresh());
+    // v18 备份没有题头样式块：尾部去掉它并降回 v18，样式回落默认静页余白，同时其余字段照旧恢复。
+    // A v18 backup has no heading-style block: drop it, downgrade the magic, and expect the plain
+    // default for the style while every other field still restores.
+    app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_FRAME);
+    assert(app_settings_backup_save() == ESP_OK);
+    saved = fopen(BACKUP_FILE, "r+b");
+    assert(saved && fread(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fread(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fread(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    assert(fread(&saved_keys, 1, sizeof(saved_keys), saved) == sizeof(saved_keys));
+    assert(fread(&saved_hold, 1, sizeof(saved_hold), saved) == sizeof(saved_hold));
+    long v18_style_at = ftell(saved) + (long)(sizeof(settings_backup_indent_adjust_t) + sizeof(settings_backup_weight_t) +
+                                           sizeof(settings_backup_wifi_t) + sizeof(settings_backup_background_t) +
+                                           sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t));
+    assert(fseek(saved, 0, SEEK_END) == 0);
+    long v19_end = ftell(saved);
+    size_t v18_tail = (size_t)(v19_end - v18_style_at - (long)sizeof(settings_backup_title_style_t));
+    uint8_t *v18_bytes = malloc(v18_tail ? v18_tail : 1);
+    assert(v18_bytes);
+    assert(fseek(saved, v18_style_at + (long)sizeof(settings_backup_title_style_t), SEEK_SET) == 0 &&
+           fread(v18_bytes, 1, v18_tail, saved) == v18_tail);
+    memcpy(legacy_header.magic, "PICOSETI", 8);
+    backup_seal(&legacy_header);
+    uint32_t v18_ext_hash = backup_shutdown_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2]);
+    for (int i = 0; i < 4; ++i) legacy_ext[i + 3] = (uint8_t)(v18_ext_hash >> (8 * i));
+    uint32_t v18_profile_hash = backup_profile_checksum(&legacy_header, legacy_ext[0], legacy_ext[1], legacy_ext[2], &saved_profile);
+    for (int i = 0; i < 4; ++i) saved_profile.checksum[i] = (uint8_t)(v18_profile_hash >> (8 * i));
+    rewind(saved);
+    assert(fwrite(&legacy_header, 1, sizeof(legacy_header), saved) == sizeof(legacy_header));
+    assert(fwrite(legacy_ext, 1, sizeof(legacy_ext), saved) == sizeof(legacy_ext));
+    assert(fwrite(&saved_profile, 1, sizeof(saved_profile), saved) == sizeof(saved_profile));
+    assert(fwrite(&saved_keys, 1, sizeof(saved_keys), saved) == sizeof(saved_keys));
+    assert(fwrite(&saved_hold, 1, sizeof(saved_hold), saved) == sizeof(saved_hold));
+    assert(fseek(saved, v18_style_at, SEEK_SET) == 0);
+    assert(fwrite(v18_bytes, 1, v18_tail, saved) == v18_tail);
+    free(v18_bytes);
+    assert(fflush(saved) == 0 && ftruncate(fileno(saved), v19_end - (long)sizeof(settings_backup_title_style_t)) == 0 && fclose(saved) == 0);
+    app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
+    assert(app_settings_backup_restore() == ESP_OK);
+    assert(app_settings_book_title_style() == APP_BOOK_TITLE_STYLE_PLAIN);
+    assert(!app_settings_reader_open_fullscreen());
+    assert(app_settings_backup_save() == ESP_OK);
     // v11 没有微调块；保留映射、网络及阅读记录，微调安全回到0。
     // V11 lacks the adjustment block; retain keys/network/history, defaulting adjustment to zero.
     saved=fopen(BACKUP_FILE,"r+b");assert(saved);
@@ -380,8 +428,8 @@ int main(void) {
     size_t v11_tail_bytes=(size_t)(v12_end-v11_network_at);uint8_t *v11_tail=malloc(v11_tail_bytes);assert(v11_tail);
     assert(fseek(saved,v11_network_at,SEEK_SET)==0&&fread(v11_tail,1,v11_tail_bytes,saved)==v11_tail_bytes);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)), v11_tail_bytes-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)));
-    v11_tail_bytes-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));v12_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));
+    memmove(v11_tail+sizeof(settings_backup_wifi_t), v11_tail+sizeof(settings_backup_wifi_t)+(LEGACY_TAIL_BLOCKS), v11_tail_bytes-sizeof(settings_backup_wifi_t)-(LEGACY_TAIL_BLOCKS));
+    v11_tail_bytes-=(LEGACY_TAIL_BLOCKS);v12_end-=(long)(LEGACY_TAIL_BLOCKS);
     memcpy(legacy_header.magic,"PICOSETB",8);backup_seal(&legacy_header);
     uint32_t v11_hash=backup_shutdown_checksum(&legacy_header,legacy_ext[0],legacy_ext[1],legacy_ext[2]);
     for(int i=0;i<4;++i)legacy_ext[i+3]=(uint8_t)(v11_hash>>(8*i));
@@ -410,8 +458,8 @@ int main(void) {
     size_t v10_tail_size=(size_t)(v11_end-v10_tail_start);uint8_t *v10_tail=malloc(v10_tail_size);assert(v10_tail);
     assert(fseek(saved,v10_tail_start,SEEK_SET)==0&&fread(v10_tail,1,v10_tail_size,saved)==v10_tail_size);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)), v10_tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)));
-    v10_tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));v11_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));
+    memmove(v10_tail+sizeof(settings_backup_wifi_t), v10_tail+sizeof(settings_backup_wifi_t)+(LEGACY_TAIL_BLOCKS), v10_tail_size-sizeof(settings_backup_wifi_t)-(LEGACY_TAIL_BLOCKS));
+    v10_tail_size-=(LEGACY_TAIL_BLOCKS);v11_end-=(long)(LEGACY_TAIL_BLOCKS);
     saved_keys.actions[0]=APP_READER_KEY_HOME;saved_keys.actions[1]=APP_READER_KEY_FULLSCREEN;saved_keys.actions[2]=APP_READER_KEY_REFRESH;
     uint32_t missing_tools_hash=backup_keys_checksum(&saved_keys);
     for(int i=0;i<4;++i)saved_keys.checksum[i]=(uint8_t)(missing_tools_hash>>(i*8));
@@ -449,8 +497,8 @@ int main(void) {
     size_t tail_size=(size_t)(file_end-tail_start);uint8_t *tail=malloc(tail_size);assert(tail);
     assert(fseek(saved,tail_start,SEEK_SET)==0&&fread(tail,1,tail_size,saved)==tail_size);
     /* 旧格式没有背景和首页组件块。/ Legacy tails omit background and Home blocks. */
-    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)), tail_size-sizeof(settings_backup_wifi_t)-(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t)));
-    tail_size-=(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));file_end-=(long)(sizeof(settings_backup_background_t)+sizeof(settings_backup_home_t)+sizeof(settings_backup_open_full_t));
+    memmove(tail+sizeof(settings_backup_wifi_t), tail+sizeof(settings_backup_wifi_t)+(LEGACY_TAIL_BLOCKS), tail_size-sizeof(settings_backup_wifi_t)-(LEGACY_TAIL_BLOCKS));
+    tail_size-=(LEGACY_TAIL_BLOCKS);file_end-=(long)(LEGACY_TAIL_BLOCKS);
     rewind(saved);assert(fwrite(&legacy_header,1,sizeof(legacy_header),saved)==sizeof(legacy_header));
     assert(fwrite(legacy_ext,1,sizeof(legacy_ext),saved)==sizeof(legacy_ext));
     assert(fwrite(&saved_profile,1,sizeof(saved_profile),saved)==sizeof(saved_profile));

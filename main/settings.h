@@ -155,6 +155,20 @@ void app_settings_set_book_fonts(bool on);
 /// body layout and illustration pagination are affected.
 bool app_settings_book_vertical(void);
 void app_settings_set_book_vertical(bool on);
+/// 章节题头样式；静页余白是历史渲染，默认沿用，老用户升级后画面不变。
+/// Chapter heading styles; plain is the historical rendering and stays the default, so upgrading
+/// changes nothing on screen.
+typedef enum {
+    APP_BOOK_TITLE_STYLE_EMBLEM, ///< 中央章徽：胶囊编号居中悬于章名上方 / Centred emblem
+    APP_BOOK_TITLE_STYLE_FRAME,  ///< 边框索引：细框加左侧粗边 / Framed index
+    APP_BOOK_TITLE_STYLE_MARK,   ///< 左锋题签：左侧竖线加左对齐文字 / Left mark
+    APP_BOOK_TITLE_STYLE_PLAIN,  ///< 静页余白：编号、章名、细线居中 / Plain quiet page
+    APP_BOOK_TITLE_STYLE_COUNT
+} app_book_title_style_t;
+#define APP_BOOK_TITLE_STYLE_DEFAULT APP_BOOK_TITLE_STYLE_PLAIN
+/// 阅读页章节题头样式，越界值回落到默认。/ Reader chapter heading style; an out-of-range value falls back to the default.
+uint8_t app_settings_book_title_style(void);
+void app_settings_set_book_title_style(uint8_t style);
 typedef enum {
     APP_READER_KEY_PREV, ///< 上一页 / Previous page
     APP_READER_KEY_NEXT, ///< 下一页 / Next page

@@ -378,6 +378,43 @@ void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text
     }
 }
 
+// 与 ui_text_title_fit 同一套字号规则：内建位图字体按标题字号换算，其余用请求字号，两端夹到 12..120。
+// The same size rule as ui_text_title_fit: the builtin bitmap face converts the title size, every
+// other face takes it as is, both clamped to 12..120.
+static int title_face_px(int preferred_px, const char *sample) {
+    int px = !title_uses_active_font(sample) && ui_font_has_text(sample)
+        ? ui_font_title_px(preferred_px, sample) : preferred_px;
+    if (px < 12) px = 12;
+    if (px > 120) px = 120;
+    return px;
+}
+
+int ui_text_title_measure(int preferred_px, const char *text, const char *font_sample, int *out_px) {
+    const char *sample = font_sample ? font_sample : text;
+    int px = title_face_px(preferred_px, sample);
+    if (out_px) *out_px = px;
+    if (!text || !text[0]) return 0;
+    return !title_uses_active_font(sample) && ui_font_has_text(sample)
+        ? ui_font_text_width_px(px, text) : ttf_text_width_px(px, text);
+}
+
+void ui_text_title_ink_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                          const char *font_sample, enum EpdFontFlags align,
+                          uint8_t ink, uint8_t paper) {
+    if (!fb || !text || !*text) return;
+    int above = 0, below = 0;
+    if (!title_uses_active_font(font_sample ? font_sample : text) &&
+        ui_font_has_text(font_sample ? font_sample : text)) {
+        ui_font_measure_line_px(px, text, &above, &below);
+        ui_font_draw_text_px(fb, x, center_y + (above - below) / 2, px, text, align, ink, paper, false);
+    } else {
+        bool prior=ttf_get_antialias();ttf_set_antialias(true);
+        ttf_measure_line_px(px, text, &above, &below);
+        ttf_draw_text_px(fb, x, center_y + (above - below) / 2, px, text, align, ink, paper);
+        ttf_set_antialias(prior);
+    }
+}
+
 void ui_text_bw(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
