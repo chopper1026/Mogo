@@ -573,7 +573,7 @@ static void time_auto_hint(char *out, size_t cap) {
         snprintf(out, cap, "自动对时需要先在 WiFi 设置里连接网络。");
         return;
     }
-    snprintf(out, cap, "自动对时每 6 小时一次；离线时设备会自己连接已保存的 WiFi 校时。");
+    snprintf(out, cap, "自动对时每 6 小时一次。");
 }
 
 /* ---- 蓝牙翻页器子页的版式 / Layout of the Bluetooth sub-page ---- */
