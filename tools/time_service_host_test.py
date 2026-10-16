@@ -88,9 +88,11 @@ static int xTaskCreate(void (*fn)(void*),const char *n,int stack,void *arg,int p
 }
 static void vTaskDelete(void *t){(void)t;}
 static bool s_auto=true;static uint32_t s_try;
+static uint32_t s_last_record;static int record_saves;
 static bool app_settings_auto_time_sync(void){return s_auto;}
 static uint32_t app_settings_time_sync_attempt(void){return s_try;}
 static void app_settings_set_time_sync_attempt(uint32_t t){s_try=t;}
+static void app_settings_set_time_sync_last(uint32_t t){s_last_record=t;++record_saves;}
 typedef struct {int present;} pmu_snapshot_t;
 static pmu_snapshot_t the_pmu;
 static const pmu_snapshot_t *read_pico_pmu_get(void){return &the_pmu;}
@@ -101,16 +103,18 @@ scheduler+=__import__('pathlib').Path(root/'main/time_sync_policy.h').read_text(
 scheduler+=r'''
 static void reset(void){
  s_loaded=false;s_last_sync=0;s_next_attempt_us=15000000;atomic_store(&s_running,false);
- stored=pending=jobs=pmu_syncs=saves=credential_reads=worker_result=0;task_ok=1;creds=true;mono=15000000;
+ stored=pending=jobs=pmu_syncs=saves=credential_reads=worker_result=record_saves=0;s_last_record=0;task_ok=1;creds=true;mono=15000000;
  network=(read_pico_transfer_status_t){READ_PICO_TRANSFER_STOPPED,READ_PICO_TRANSFER_MODE_STA,false};
 }
 int main(void){
  reset();app_time_service_poll(false);assert(!jobs&&!s_loaded);app_time_service_poll(true);assert(jobs==1);
  app_time_service_poll(true);assert(jobs==1);job(NULL);assert(!atomic_load(&s_running));
- app_time_service_poll(true);assert(pmu_syncs==1&&saves==1&&stored==(uint64_t)wall&&jobs==1);
- mono+=3600000000LL;wall+=3600;app_time_service_poll(true);assert(jobs==1); // offline waits6h
+ app_time_service_poll(true);assert(pmu_syncs==1&&saves==1&&stored==(uint64_t)wall&&record_saves==1&&s_last_record==wall&&jobs==1);
+ mono+=3600000000LL;wall+=3600;app_time_service_poll(true);assert(jobs==1); // one hour is not enough
  network=(read_pico_transfer_status_t){READ_PICO_TRANSFER_READY,READ_PICO_TRANSFER_MODE_STA,true};
- app_time_service_poll(true);assert(jobs==2);job(NULL);app_time_service_poll(true);assert(pmu_syncs==2);
+ app_time_service_poll(true);assert(jobs==1); // online does not shorten the cadence either
+ mono+=18000LL*1000000;wall+=18000;app_time_service_poll(true);assert(jobs==2); // six hours, reusing the online link
+ job(NULL);app_time_service_poll(true);assert(pmu_syncs==2&&record_saves==2&&s_last_record==wall);
  reset();stored=wall-21600;app_time_service_poll(true);assert(jobs==1); // overdue offline
  reset();stored=wall-21599;app_time_service_poll(true);assert(!jobs);
  for(int state=1;state<=4;++state){reset();network.state=state;network.mode=READ_PICO_TRANSFER_MODE_AP;network.network_ready=true;app_time_service_poll(true);assert(!jobs);}
@@ -118,8 +122,10 @@ int main(void){
  reset();task_ok=0;app_time_service_poll(true);assert(!jobs&&!atomic_load(&s_running));
  task_ok=1;app_time_service_poll(true);assert(!jobs);mono+=CLOCK_RETRY_US;app_time_service_poll(true);assert(jobs==1);
  reset();worker_result=ESP_FAIL;app_time_service_poll(true);job(NULL);app_time_service_poll(true);assert(!pmu_syncs&&!saves&&jobs==1);
- pending=wall;app_time_service_poll(false);assert(pending);app_time_service_poll(true);assert(!pending&&pmu_syncs==1&&saves==1);
- puts("PASS: actual scheduler hourly online/6h offline, idle gating, single temporary worker, AP/upload exclusion, no-credential/OOM/error backoff and real-sync-only PMU/NVS handoff");
+ pending=wall;app_time_service_poll(false);assert(pending);app_time_service_poll(true);assert(!pending&&pmu_syncs==1&&saves==1&&record_saves==1);
+ reset();app_time_service_note_success(0);assert(!record_saves); // an invalid UTC cannot enter the record
+ app_time_service_note_success(wall);assert(record_saves==1&&s_last_record==wall);
+ puts("PASS: actual scheduler on a flat six-hour cadence (online link reused, offline dialed), the settings last-sync record refreshed on every success, idle gating, single temporary worker, AP/upload exclusion, no-credential/OOM/error backoff and real-sync-only PMU/NVS handoff");
 }
 '''
 lease=common+r'''

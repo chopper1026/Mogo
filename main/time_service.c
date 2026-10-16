@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：S3 RTC 离线走时；在线每小时校准，离线每六小时短连已保存 WiFi。
+ * 中文：S3 RTC 离线走时；每六小时自动对时一次，已联网就复用现有连接，否则短连已保存 WiFi。
  * 准入在 rc93 有界后台校准上补齐产品守卫：设置开关、电量门与失败冷却/开机上限
  * （判定复用 time_sync_policy.h，无硬件依赖，host 测试覆盖）。
- * English: S3 RTC keeps offline time; calibrate hourly online or briefly every six hours offline.
+ * English: S3 RTC keeps offline time; auto-calibrate every six hours, reusing an existing link
+ * when online and briefly dialing the saved WiFi when offline.
  * rc93's bounded background calibration gains the product guards: the settings switch, a battery
  * floor and failure cooldown/attempt caps (decisions reuse time_sync_policy.h, hardware-free and
  * covered by the host test).
@@ -29,8 +30,7 @@
 
 #define CLOCK_VALID_MIN 1704067200ULL
 #define CLOCK_VALID_MAX 4102444799ULL
-#define CLOCK_ONLINE_INTERVAL 3600ULL
-#define CLOCK_OFFLINE_INTERVAL (6ULL * 3600)
+#define CLOCK_INTERVAL (6ULL * 3600)
 #define CLOCK_RETRY_US (5LL * 60 * 1000000)
 // 电量低于该百分比且未充电时不为对时开无线；油量表未知视为可以通过。
 // Below this state of charge, and while not charging, keep the radio off; an unknown gauge passes.
@@ -69,6 +69,9 @@ void app_time_service_note_success(uint32_t utc_seconds) {
     s_last_sync = utc_seconds;
     s_boot_attempts = 0;
     s_next_attempt_us = esp_timer_get_time() + CLOCK_RETRY_US;
+    // 设置页「上次对时」读这条设置记录，判定仍用上面的 last_ntp。
+    // The settings page reads this record for "last sync"; decisions still use last_ntp above.
+    app_settings_set_time_sync_last(utc_seconds);
     nvs_handle_t handle;
     if (nvs_open("kiiko_clock", NVS_READWRITE, &handle) == ESP_OK) {
         if (nvs_set_u64(handle, "last_ntp", s_last_sync) == ESP_OK) (void)nvs_commit(handle);
@@ -94,6 +97,9 @@ void app_time_service_poll(bool idle) {
         s_last_sync = received;
         s_boot_attempts = 0;
         (void)app_sync_time_to_pmu();
+        // 设置页「上次对时」与后台判定同源；缺了这条记录那行就永远停在旧值。
+        // Keep the settings record in step with the background decision, or the page freezes.
+        app_settings_set_time_sync_last(received);
         nvs_handle_t handle;
         if (nvs_open("kiiko_clock", NVS_READWRITE, &handle) == ESP_OK) {
             if (nvs_set_u64(handle, "last_ntp", s_last_sync) == ESP_OK) (void)nvs_commit(handle);
@@ -111,14 +117,16 @@ void app_time_service_poll(bool idle) {
                   status.mode == READ_PICO_TRANSFER_MODE_STA && status.network_ready;
     if (!online && status.state != READ_PICO_TRANSFER_STOPPED) return;
     time_t now = time(NULL);
-    uint64_t interval = online ? CLOCK_ONLINE_INTERVAL : CLOCK_OFFLINE_INTERVAL;
+    // 节奏固定 6 小时：已联网就复用现有连接，不额外开射频；离线才短连已保存 WiFi。
+    // A flat six-hour cadence: reuse an existing link when online, otherwise dial the saved WiFi.
+    uint64_t interval = CLOCK_INTERVAL;
     // 记录比时钟超前（时钟被调回）按刚校准处理，避免追赶式联网；时钟无效只允许开机首试。
     // 重试节奏由 next_attempt_us（5 分钟，单调时钟）与开机上限承担；持久化的 tsync_try
-    // 只做记录，读回来会破坏测试锁定的 1h/6h 节奏。
+    // 只做记录，读回来会破坏测试锁定的 6 小时节奏。
     // A record ahead of the clock (clock moved back) counts as fresh to avoid catch-up storms;
     // with an invalid clock only the first boot attempt is allowed. Retry rhythm comes from
     // next_attempt_us (5 minutes, monotonic) and the boot cap; the persisted tsync_try stays a
-    // record only — reading it back would break the tested 1h/6h cadence.
+    // record only — reading it back would break the tested six-hour cadence.
     if (app_time_sync_clock_valid((uint32_t)now)) {
         if (!app_time_sync_record_usable((uint32_t)now, (uint32_t)s_last_sync)) return;
         if (s_last_sync && (uint64_t)now >= s_last_sync && (uint64_t)now - s_last_sync < interval)
