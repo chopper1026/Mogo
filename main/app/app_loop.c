@@ -686,6 +686,9 @@ void app_loop_run(const app_loop_config_t* config) {
     // are replayed on wake; if the task cannot start, the loop reads directly.
     touch_sampler_start(config->tp);
 
+    // 上一轮是否切过页/换过屏；只有这种残留导航才丢弃，普通刷新阻塞期间的点击必须放行。
+    // Whether the previous iteration changed screens; only such stale navigation is dropped.
+    bool just_transitioned = false;
     while (true) {
         unsigned requested_cover_policy = (unsigned)app_settings_main_refresh_mode() | ((unsigned)app_settings_system_contrast() << 8);
         if (requested_cover_policy != cover_policy) {
@@ -795,10 +798,16 @@ void app_loop_run(const app_loop_config_t* config) {
             app_time_service_poll(!touch.touched && ctx.now_ms - last_input_ms >= 10000 &&
                 !current->holds_pmu && !usb_storage_active() && !pico_online_busy() && !ble_pt_connected());
         }
-        // A load may have captured navigation after the prior switch. Consume it at the normal boundary.
-
-        ctx.request_menu = false;
-        ctx.request_return = false;
+        // 只丢弃「上一轮切过屏」时残留的导航：那是用户在新界面就绪前点到旧界面的动作。
+        // 无条件清会连触摸采样器回放路径设好的 request_return 一起抹掉（停止传书按钮
+        // 点不动即由此而来）；普通刷新阻塞期间的点击必须放行。
+        // Drop navigation only right after a screen change; the unconditional clear also erased
+        // requests set by the sampler's replay path (the dead transfer stop button).
+        if (just_transitioned) {
+            just_transitioned = false;
+            ctx.request_menu = false;
+            ctx.request_return = false;
+        }
         bool selected_from_menu = false;
         const bool power_input_owned = power_dialog_open;
         bool quick_lock_requested = false;
@@ -822,6 +831,7 @@ void app_loop_run(const app_loop_config_t* config) {
                 else app_present(&ctx, current, APP_REDRAW_FULL);
                 // 本轮旧输入不再触发动作，下一轮恢复正常事件处理。
                 // Discard this tick's stale input, then resume normal dispatch next tick.
+                just_transitioned = true;
                 vTaskDelay(pdMS_TO_TICKS(LOOP_TICK_MS));
                 continue;
             }
@@ -1230,6 +1240,7 @@ void app_loop_run(const app_loop_config_t* config) {
             poll_media(&ctx, current, &media_mounted, &media_invalidated);
             last_media_poll_ms = ctx.now_ms;
             ctx.pressed = ctx.released = false;
+            just_transitioned = true;
             if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
             else app_present(&ctx, current, APP_REDRAW_PAGE);
         }
@@ -1269,6 +1280,7 @@ void app_loop_run(const app_loop_config_t* config) {
             ctx.request_menu = false;
             ctx.request_return = false;
             ctx.consumed = true;
+            just_transitioned = true;
             if (go_back) {
                 bool main_source = main_page_ready(&ctx, current);
                 bool shelf_source = main_source && app_index_of(current) == 1;
