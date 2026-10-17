@@ -156,6 +156,13 @@ int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_
 /// Rasterize the active face directly with gray antialiasing at the target size, visually centered and independent of UI scaling.
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
                       const char *font_sample, enum EpdFontFlags align);
+/// 合成加粗：TTF 在字形覆盖率图上做各向膨胀再一次性光栅化（单次抗锯齿，无多遍描边的灰边），
+/// 内建位图字面则向右、向下各多描一遍；不换字重、不重载字库，字宽不变。
+/// Synthetic bold: TTF dilates the glyph coverage map and rasterizes once (a single antialiased
+/// pass, no gray fringe from repeated strikes), while the builtin bitmap face is painted one pixel
+/// right and down. No other face or font reload, and advances are unchanged.
+void ui_text_title_bold_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                           const char *font_sample, enum EpdFontFlags align);
 /// 与 ui_text_title_fit 同一规则，补充位图字面的基准字号由调用方给出（0 = 内建 24）。
 /// The rule of ui_text_title_fit with the bitmap supplement's base size supplied by the caller
 /// (zero keeps the builtin 24).

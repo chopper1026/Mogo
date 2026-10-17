@@ -8,6 +8,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 - rc95 本地测试（2026-10-17）：阅读「排版设置」的边距改为 0～60 像素的真实留白，2 像素一档共 31 档，左右留白严格相等；点按滑轨左右两端可逐档微调。完整正文行把行尾余量摊到字间，不再把栏宽吸附到整字格。旧保存值直接沿用，数值含义变为实际像素（默认 48 px 字号下原「24」由 30 px 变为 24 px）。
   rc95 local test (2026-10-17): the Typography margin is now a real 0–60 px inset in 2 px steps (31 stops) with exactly equal side margins, and the small/large ends step one stop per tap. Complete body lines spread their spare width between glyphs instead of snapping the column to whole glyph cells. Saved margins carry over, now meaning actual pixels (the old “24” renders as 24 px instead of 30 px at the default 48 px font).
 
+- rc95 本地测试（2026-10-17）：「标题样式」面板改为占三分之二屏；说明、标题字号行与四款样式在 642 px 视口里按三槽整槽滚动（上下滑或拖动，一次一到两槽），首屏显示说明、字号行和前两款样式，右侧滚动条指示进度。卡片仍是真实题头 1:1 预览，滚动不改选择、不重排正文。
+  rc95 local test (2026-10-17): the Heading style sheet now covers two thirds of the screen. The note, size row and four styles scroll through a 642 px three-slot viewport (swipe or drag, one or two slots per gesture); the first screen shows the note, size row and the first two styles, with a slim scrollbar for progress. The cards keep their 1:1 real-heading previews, and scrolling changes neither the selection nor the body layout.
+
+- rc95 本地测试（2026-10-17）：章节标题改为合成加粗——在字形覆盖率图上做各向膨胀后一次成像，深色笔画面积约多三成，边缘仍是单次抗锯齿，不会出现多遍描边的灰毛边；四款横排样式共用，编号仍保持常规字重。静态字体、内建字体与导入字体都生效，不加载额外字库、不改变排版预留。
+  rc95 local test (2026-10-17): chapter titles are now synthetically bold by dilating the glyph coverage before a single rasterization: about thirty percent more dark ink with a clean single antialiased edge instead of the gray fringe of repeated strikes. All four horizontal styles share it while the chapter label keeps its regular weight; static, builtin and imported faces all take it without another font load or a change to the layout reservation.
+
 - 阅读工具栏展开时，点按正文只收起工具栏，不再顺带翻页；再次点按才翻页，左右/上下滑动、三键、电源键与晃动翻页保持不变。工具栏按钮、页眉、左右边距与通栏插图侧边条同样只收起。
   With the reader toolbar open, a body tap now only dismisses it instead of also turning the page; the next tap turns, while horizontal/vertical swipes, keys, the power key and shake turns keep working. Toolbar buttons, the header, side margins and full-bleed image strips behave the same way.
 - 修复从书架重新开书时全屏偏好未生效的问题：工具栏切换全屏后，新开书沿用刚记住的偏好（默认全屏）。

@@ -398,6 +398,38 @@ void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text
     }
 }
 
+// 章名加粗的覆盖率增量，1/16 像素一步：8 是半像素的各向膨胀，深色笔画面积约多三成，
+// 比多遍描边更干净——覆盖率一次膨胀、一次抗锯齿，不会叠出双层灰边。
+// The coverage added to a chapter title in 1/16-pixel steps: 8 is half a pixel of isotropic
+// dilation, about thirty percent more dark ink, and cleaner than repeated strikes because the
+// coverage is dilated once and antialiased once instead of stacking two gray edges.
+#define UI_TITLE_BOLD_STEPS 8
+
+// 合成加粗：TTF 在覆盖率图上做各向膨胀再一次性光栅化，边缘仍是单次抗锯齿，不会出现多遍描边的
+// 灰毛边；内建位图字面是二值字形，没有覆盖率可调，改为向右侧、下方各多描一遍，保持硬边。
+// Synthetic bold: TTF dilates the coverage map and rasterizes once, so the edge stays a single
+// antialiased pass with no gray fringe from repeated strikes. The builtin bitmap face has binary
+// glyphs and no coverage to adjust, so it is painted again one pixel right and down to keep hard
+// edges. Both keep the original advances, so fitting and layout are untouched.
+void ui_text_title_bold_vc(uint8_t *fb, int x, int center_y, int px, const char *text,
+                           const char *font_sample, enum EpdFontFlags align) {
+    if (!fb || !text || !*text) return;
+    const char *sample = font_sample ? font_sample : text;
+    if (!title_uses_active_font(sample) && ui_font_has_text(sample)) {
+        ui_text_title_vc(fb, x + 1, center_y + 1, px, text, font_sample, align);
+        ui_text_title_vc(fb, x + 1, center_y, px, text, font_sample, align);
+        ui_text_title_vc(fb, x, center_y + 1, px, text, font_sample, align);
+        ui_text_title_vc(fb, x, center_y, px, text, font_sample, align);
+        return;
+    }
+    int prior = ttf_get_stroke_adjust_fine();
+    int bold = prior + UI_TITLE_BOLD_STEPS;
+    if (bold > 32) bold = 32;
+    ttf_set_stroke_adjust_fine_scoped(bold);
+    ui_text_title_vc(fb, x, center_y, px, text, font_sample, align);
+    ttf_set_stroke_adjust_fine_scoped(prior);
+}
+
 int ui_text_title_measure_sized(int preferred_px, const char *text, const char *font_sample,
                                 int supplement_px, int *out_px) {
     const char *sample = font_sample ? font_sample : text;

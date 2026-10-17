@@ -47,6 +47,11 @@ void ttf_measure_line_px(int px, const char *text, int *above, int *below) {
 static bool antialias = true;
 void ttf_set_antialias(bool enabled) { antialias = enabled; }
 bool ttf_get_antialias(void) { return antialias; }
+// 合成加粗用的临时笔画：这里只需记录读写，字模由各用例自己的桩决定。
+// Scoped stroke for synthetic bold: record the value; the glyph stubs stay per-case.
+static int stroke_adjust;
+int ttf_get_stroke_adjust_fine(void) { return stroke_adjust; }
+void ttf_set_stroke_adjust_fine_scoped(int steps) { stroke_adjust = steps; }
 void ui_font_draw_text_px(uint8_t *fb, int x, int baseline, int px, const char *text,
                           enum EpdFontFlags align, uint8_t fg, uint8_t bg, bool bw) {
     (void)fb; (void)x; (void)text; (void)align; (void)fg; (void)bg; (void)bw;

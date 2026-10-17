@@ -193,6 +193,10 @@
 // ([4, 180], 176 tall), the block is centred in the band, and the size scale measures from it.
 #define READER_HEADING_BLOCK_TOP 4
 #define READER_HEADING_BLOCK_HEIGHT 176
+// 章名合成加粗：覆盖率膨胀让墨迹向四周各多出约一像素，所以排版截短时先让出这一像素的宽度。
+// The title is synthetically bolded with a coverage dilation that grows the ink by about one pixel
+// on every side, so fitting yields that pixel of width before truncating.
+#define READER_HEADING_BOLD_PX 1
 
 typedef enum { SHELF, READING, TOC, MANAGE, BULK, IMPORT, SEARCH, EDIT } book_view_t;
 typedef enum {
@@ -2446,12 +2450,21 @@ static void draw_key_picker(uint8_t *fb) {
 // （最上沿是边框索引的框顶 y+10，最下沿是静页余白的细线 y+175）。
 // A card holds the real heading band's [y+4, y+176] window at 1:1: every style fits in those 172
 // pixels, the frame's y+10 being the topmost art and the plain hairline at y+175 the lowest.
-#define TITLE_STYLE_SHEET_TOP 50
-#define TITLE_STYLE_CARD_TOP 262
+// 用户 2026-10-17：面板占三分之二屏，内容按 214 一槽整槽滚动；视口正好三槽，卡片永远整张可见，
+// 不需要给 ui_kit 加裁剪。槽 0 是说明与字号行，槽 1..4 是四张样式卡。
+// User 2026-10-17: the sheet covers two thirds of the screen and scrolls in 214 px slots; the
+// viewport is exactly three slots, so every card stays whole and ui_kit needs no clipping. Slot 0
+// holds the note and size row, slots 1..4 the four style cards.
+#define TITLE_STYLE_SHEET_TOP 405
+#define TITLE_STYLE_VIEW_TOP 501
+#define TITLE_STYLE_VIEW_BOTTOM 1143
+#define TITLE_STYLE_VIEW_HEIGHT 642
+#define TITLE_STYLE_VIEW_SLOTS 3
 #define TITLE_STYLE_CARD_PITCH 214
 #define TITLE_STYLE_CARD_HEIGHT 206
 #define TITLE_STYLE_WINDOW_TOP 30
 #define TITLE_STYLE_WINDOW_HEIGHT 176
+#define TITLE_STYLE_FOOTER_TOP 1150
 // 预览窗贴的是题头块本身：块在带内居中，窗口偏移就是带高与块高之差的一半。
 // The preview window holds the heading block itself: the block is centred in the band, so the
 // window's offset is half the difference between the band and the block.
@@ -2461,6 +2474,24 @@ _Static_assert(TITLE_STYLE_BAND_WINDOW_TOP ==
                "preview window must keep showing the centred heading block");
 _Static_assert(TITLE_STYLE_WINDOW_HEIGHT == READER_HEADING_BLOCK_HEIGHT,
                "preview window height must equal the heading block height");
+_Static_assert(TITLE_STYLE_VIEW_TOP + TITLE_STYLE_VIEW_HEIGHT == TITLE_STYLE_VIEW_BOTTOM,
+               "viewport bottom must follow from its top and height");
+_Static_assert(TITLE_STYLE_VIEW_HEIGHT == TITLE_STYLE_VIEW_SLOTS * TITLE_STYLE_CARD_PITCH,
+               "viewport must hold whole slots only");
+_Static_assert(TITLE_STYLE_SHEET_TOP == UI_LOCK_HEIGHT / 3,
+               "sheet covers two thirds of the screen");
+
+// 滚动量只取槽高的整数倍，绘制与命中共用；拖动闩保证一次手势只走一步。
+// The offset is always a whole number of slots and shared by painting and hit testing; the drag
+// latch keeps one step per gesture.
+static int s_title_style_scroll;
+static bool s_title_style_drag;
+
+// 槽顶含滚动量：负值表示该槽已滚到视口上方。
+// Slot top including the scroll offset: a negative value means the slot has scrolled above the viewport.
+static int title_style_slot_y(int slot) {
+    return TITLE_STYLE_VIEW_TOP - s_title_style_scroll + slot * TITLE_STYLE_CARD_PITCH;
+}
 
 static const char* const s_title_style_names[] = {"中央章徽", "边框索引", "左锋题签", "静页余白"};
 static const char* const s_title_style_details[] = {
@@ -2473,8 +2504,7 @@ static const char* reader_title_style_name(int style) {
     return style >= 0 && style < APP_BOOK_TITLE_STYLE_COUNT ? s_title_style_names[style] : "";
 }
 static EpdRect title_style_card_rect(int index) {
-    return (EpdRect){36, TITLE_STYLE_CARD_TOP + index * TITLE_STYLE_CARD_PITCH,
-                     612, TITLE_STYLE_CARD_HEIGHT};
+    return (EpdRect){36, title_style_slot_y(index + 1), 612, TITLE_STYLE_CARD_HEIGHT};
 }
 static EpdRect title_style_window_rect(int index) {
     EpdRect card = title_style_card_rect(index);
@@ -2497,14 +2527,18 @@ static const char* title_style_preview_title(void) {
     return s_chapter_heading_title[0] ? s_chapter_heading_title : "远方来信";
 }
 // 字号行：左标签加「−／当前值 · 复位／+」三段，与「缩进微调」同款；绘制与命中共用同一组矩形。
+// 行顶相对槽 0 计算，随滚动一起移动。
 // The size row: a left label plus the -/value-reset/+ trio, the same shape as the indent nudge, with
-// one set of rectangles shared by painting and hit testing.
-#define TITLE_STYLE_SIZE_ROW_TOP 186
+// one set of rectangles shared by painting and hit testing. Its top is relative to slot 0 and moves
+// with the scroll.
+#define TITLE_STYLE_SIZE_ROW_TOP 76
 static EpdRect heading_size_rect(int index) {
     const EpdRect controls[] = {{214, TITLE_STYLE_SIZE_ROW_TOP, 100, 64},
                                 {322, TITLE_STYLE_SIZE_ROW_TOP, 208, 64},
                                 {538, TITLE_STYLE_SIZE_ROW_TOP, 100, 64}};
-    return controls[index];
+    EpdRect rect = controls[index];
+    rect.y += title_style_slot_y(0);
+    return rect;
 }
 
 // 面板里只显示当前档位，改档立刻重画面板；预览固定基准档，所以这里的反馈就是数字与位置本身。
@@ -2514,7 +2548,7 @@ static void draw_heading_size_row(uint8_t *fb) {
     char value[32];
     snprintf(value, sizeof(value), "%d px · 复位", app_settings_book_title_size());
     const char *labels[] = {"−", value, "+"};
-    ui_text_box(fb, (EpdRect){42, TITLE_STYLE_SIZE_ROW_TOP, 154, 64}, 24, "标题字号",
+    ui_text_box(fb, (EpdRect){42, heading_size_rect(0).y, 154, 64}, 24, "标题字号",
                 EPD_DRAW_ALIGN_LEFT, false);
     for (int i = 0; i < 3; ++i) {
         EpdRect control = heading_size_rect(i);
@@ -2542,10 +2576,23 @@ static app_redraw_t apply_heading_size(int control) {
 static void draw_title_style_picker(uint8_t* fb) {
     draw_sheet(fb, TITLE_STYLE_SHEET_TOP, "标题样式");
     draw_sheet_back(fb, TITLE_STYLE_SHEET_TOP);
-    ui_text_box(fb,(EpdRect){36,TITLE_STYLE_SHEET_TOP+96,612,30},19,title_style_note(),EPD_DRAW_ALIGN_CENTER,false);
-    draw_heading_size_row(fb);
+    // 只画完整落在视口里的槽；滚动步长与槽高同为 214，落点永远对齐，不会切出半张卡。
+    // Paint only slots fully inside the viewport; the step equals the slot height, so a card is never
+    // cut in half.
+    int first = s_title_style_scroll / TITLE_STYLE_CARD_PITCH;
     int selected = app_settings_book_title_style();
-    for (int i = 0; i < APP_BOOK_TITLE_STYLE_COUNT; ++i) {
+    for (int slot = first; slot < first + TITLE_STYLE_VIEW_SLOTS && slot <= APP_BOOK_TITLE_STYLE_COUNT; ++slot) {
+        if (slot == 0) {
+            int y = title_style_slot_y(0);
+            ui_text_box(fb,(EpdRect){36,y+12,612,30},19,title_style_note(),EPD_DRAW_ALIGN_CENTER,false);
+            draw_heading_size_row(fb);
+            char current[64];
+            snprintf(current, sizeof(current), "当前样式 · %s", reader_title_style_name(selected));
+            ui_text_box(fb,(EpdRect){42,y+160,360,30},19,current,EPD_DRAW_ALIGN_LEFT,false);
+            ui_text_box(fb,(EpdRect){420,y+160,222,30},19,"上滑查看更多",EPD_DRAW_ALIGN_RIGHT,false);
+            continue;
+        }
+        int i = slot - 1;
         EpdRect card = title_style_card_rect(i);
         bool active = i == selected;
         // 卡片底 → 预览窗底 → 内容 → 卡片边框：白色预览窗铺到卡片边缘，边框必须最后画，
@@ -2571,8 +2618,18 @@ static void draw_title_style_picker(uint8_t* fb) {
         ui_draw_control_frame(fb, card, 20, active ? UI_GRAY_BLACK : 0x88);
         if (active) ui_draw_control_frame(fb,(EpdRect){card.x+1,card.y+1,card.width-2,card.height-2},19,UI_GRAY_BLACK);
     }
-    ui_fill_round_rect(fb,(EpdRect){36,1126,612,58},20,UI_GRAY_BLACK);
-    reader_panel_text_vc(fb,342,1155,24,"返回字体设置",EPD_DRAW_ALIGN_CENTER,true);
+    // 滚动条：五槽内容对三槽视口，拇指按比例落位；只有两档位移，开销可忽略。
+    // Scroll indicator: five slots of content against a three-slot viewport, thumb placed by ratio.
+    const int track_top = TITLE_STYLE_VIEW_TOP + 8;
+    const int track_height = TITLE_STYLE_VIEW_HEIGHT - 16;
+    const int content_height = (APP_BOOK_TITLE_STYLE_COUNT + 1) * TITLE_STYLE_CARD_PITCH;
+    const int max_scroll = content_height - TITLE_STYLE_VIEW_HEIGHT;
+    int thumb_height = track_height * TITLE_STYLE_VIEW_HEIGHT / content_height;
+    int thumb_top = track_top + (track_height - thumb_height) * s_title_style_scroll / max_scroll;
+    ui_fill_round_rect(fb,(EpdRect){660,track_top,4,track_height},2,0xd8);
+    ui_fill_round_rect(fb,(EpdRect){660,thumb_top,4,thumb_height},2,0x78);
+    ui_fill_round_rect(fb,(EpdRect){36,TITLE_STYLE_FOOTER_TOP,612,58},20,UI_GRAY_BLACK);
+    reader_panel_text_vc(fb,342,TITLE_STYLE_FOOTER_TOP+29,24,"返回字体设置",EPD_DRAW_ALIGN_CENTER,true);
 }
 
 static int reader_font_picker_top(void) { return app_settings_system_font_size()>=150?270:584; }
@@ -2938,8 +2995,8 @@ static void draw_heading_plain(uint8_t *fb, EpdRect band, int text_x, int title_
                                const char *label, const char *label_sample) {
     ui_text_title_vc(fb, text_x, heading_line(band, 29, scale_px), label_px, label, label_sample,
                      EPD_DRAW_ALIGN_CENTER);
-    ui_text_title_vc(fb, text_x, heading_line(band, 112, scale_px), title_px, title, title_sample,
-                     EPD_DRAW_ALIGN_CENTER);
+    ui_text_title_bold_vc(fb, text_x, heading_line(band, 112, scale_px), title_px, title, title_sample,
+                          EPD_DRAW_ALIGN_CENTER);
     const int line_w = heading_len(264, scale_px);
     ui_hairline(fb, heading_line(band, 174, scale_px), band.x + (band.width - line_w) / 2, line_w,
                 UI_GRAY_LIGHT);
@@ -2967,8 +3024,8 @@ static void draw_heading_emblem(uint8_t *fb, EpdRect band, int text_x, int title
         ui_text_title_ink_vc(fb, text_x, pill_cy, pill_px, label, label_sample,
                              EPD_DRAW_ALIGN_CENTER, UI_INK_WHITE, UI_INK_BLACK);
     }
-    ui_text_title_vc(fb, text_x, heading_line(band, has_label ? 140 : 107, scale_px), title_px, title,
-                     title_sample, EPD_DRAW_ALIGN_CENTER);
+    ui_text_title_bold_vc(fb, text_x, heading_line(band, has_label ? 140 : 107, scale_px), title_px,
+                          title, title_sample, EPD_DRAW_ALIGN_CENTER);
 }
 
 // 边框索引：细框加左侧粗边，编号与章名都在框内左对齐。
@@ -2986,8 +3043,9 @@ static void draw_heading_frame(uint8_t *fb, EpdRect band, int text_x, int title_
     if (has_label)
         ui_text_title_vc(fb, text_x, heading_line(band, 52, scale_px), label_px, label, label_sample,
                          EPD_DRAW_ALIGN_LEFT);
-    ui_text_title_vc(fb, text_x, has_label ? heading_line(band, 140, scale_px) : box.y + box.height / 2,
-                     title_px, title, title_sample, EPD_DRAW_ALIGN_LEFT);
+    ui_text_title_bold_vc(fb, text_x,
+                          has_label ? heading_line(band, 140, scale_px) : box.y + box.height / 2,
+                          title_px, title, title_sample, EPD_DRAW_ALIGN_LEFT);
 }
 
 // 左锋题签：左侧一道竖线，编号与章名左对齐紧随其后。
@@ -3005,8 +3063,8 @@ static void draw_heading_mark(uint8_t *fb, EpdRect band, int text_x, int title_p
     if (has_label)
         ui_text_title_vc(fb, text_x, heading_line(band, 50, scale_px), label_px, label, label_sample,
                          EPD_DRAW_ALIGN_LEFT);
-    ui_text_title_vc(fb, text_x, heading_line(band, has_label ? 136 : 107, scale_px), title_px, title,
-                     title_sample, EPD_DRAW_ALIGN_LEFT);
+    ui_text_title_bold_vc(fb, text_x, heading_line(band, has_label ? 136 : 107, scale_px), title_px,
+                          title, title_sample, EPD_DRAW_ALIGN_LEFT);
 }
 
 // 题头带里画一次：左右对齐的样式用 text_x 当左边缘，居中样式当中心；字号与宽度在这里一次算准，
@@ -3034,7 +3092,8 @@ static void draw_reader_title_style(uint8_t *fb, EpdRect band, int style, int sc
         text_w = band.width - 68;
     }
     char title[sizeof(s_chapter_heading_title)], label[sizeof(s_chapter_heading_label)];
-    int title_px = reader_heading_fit(title, sizeof(title), title_sample, scale_px, text_w, scale_px / 2);
+    int title_px = reader_heading_fit(title, sizeof(title), title_sample, scale_px,
+                                      text_w - READER_HEADING_BOLD_PX, scale_px / 2);
     int label_px = reader_heading_fit(label, sizeof(label), label_sample, scale_px / 2, text_w,
                                       scale_px / 2);
     switch (style) {
@@ -5435,6 +5494,8 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         }
         if (ui_rect_hit(title_style_entry_rect(), x, y)) {
             s_reader_slider = -1;
+            s_title_style_scroll = 0;
+            s_title_style_drag = false;
             s_reader_panel = READER_PANEL_TITLE_STYLE;
             return APP_REDRAW_PAGE;
         }
@@ -5444,11 +5505,14 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
     }
     if (s_reader_panel == READER_PANEL_TITLE_STYLE) {
         EpdRect back_icon = {32, TITLE_STYLE_SHEET_TOP + 25, 64, 64};
-        EpdRect back_button = {36, 1126, 612, 58};
+        EpdRect back_button = {36, TITLE_STYLE_FOOTER_TOP, 612, 58};
         if (y < TITLE_STYLE_SHEET_TOP || ui_rect_hit(back_icon, x, y) || ui_rect_hit(back_button, x, y)) {
             s_reader_panel = READER_PANEL_LAYOUT_SETTINGS;
             return APP_REDRAW_PAGE;
         }
+        // 槽位坐标已含滚动量；视口外的旧矩形不参与命中。
+        // Slot coordinates already include the scroll offset; rects outside the viewport never hit.
+        if (y < TITLE_STYLE_VIEW_TOP || y >= TITLE_STYLE_VIEW_BOTTOM) return APP_REDRAW_NONE;
         for (int i = 0; i < 3; ++i) {
             if (ui_rect_hit(heading_size_rect(i), x, y)) return apply_heading_size(i);
         }
@@ -6214,6 +6278,39 @@ static int reader_swipe_direction(ui_gesture_type_t type, bool vertical) {
     return direction;
 }
 
+// 标题样式面板：一次手势走一槽或两槽，落点始终对齐槽边界，卡片不会被切开。
+// Heading-style sheet: one gesture moves one or two slots and always lands on a slot boundary, so no
+// card is ever cut in half.
+static app_redraw_t title_style_scroll_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
+    // 只接管视口内起手的纵向手势；头部返回键与底部按钮保持原语义。
+    // Take over only vertical gestures that start inside the viewport; header and footer keep their taps.
+    if (ev->y0 < TITLE_STYLE_VIEW_TOP || ev->y0 >= TITLE_STYLE_VIEW_BOTTOM) return APP_REDRAW_NONE;
+    if (s_title_style_drag) {
+        if (ev->type != UI_GESTURE_MOVE) s_title_style_drag = false;
+        return APP_REDRAW_NONE;
+    }
+    int dy = (int)ev->y - ev->y0, dx = (int)ev->x - ev->x0;
+    int distance = dy < 0 ? -dy : dy;
+    if (ev->type == UI_GESTURE_MOVE) {
+        int across = dx < 0 ? -dx : dx;
+        if (distance < 108 || distance <= across) return APP_REDRAW_NONE;
+    }
+    int steps = distance < 320 ? 1 : 2;
+    bool up = ev->type == UI_GESTURE_SWIPE_U || (ev->type == UI_GESTURE_MOVE && dy < 0);
+    int content_height = (APP_BOOK_TITLE_STYLE_COUNT + 1) * TITLE_STYLE_CARD_PITCH;
+    int max_scroll = content_height - TITLE_STYLE_VIEW_HEIGHT;
+    int next = s_title_style_scroll + (up ? steps : -steps) * TITLE_STYLE_CARD_PITCH;
+    if (next < 0) next = 0;
+    if (next > max_scroll) next = max_scroll;
+    if (ev->type == UI_GESTURE_MOVE) s_title_style_drag = true;
+    if (next == s_title_style_scroll) return APP_REDRAW_NONE;
+    s_title_style_scroll = next;
+    render(ctx, ctx->fb);
+    s_area = (EpdRect){0, TITLE_STYLE_VIEW_TOP, UI_LOCK_WIDTH, TITLE_STYLE_VIEW_HEIGHT};
+    s_mode = MODE_GL16;
+    return APP_REDRAW_AREA;
+}
+
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
     if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,388,74},ev->x0,ev->y0)))
         return shelf_category_gesture(ctx,ev);
@@ -6221,6 +6318,19 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
         s_reader_panel == READER_PANEL_BACKGROUND_PREVIEW) &&
         (ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D)) {
         return reader_background_step(ev->type == UI_GESTURE_SWIPE_U ? 1 : -1);
+    }
+    if (s_view == READING && s_reader_panel == READER_PANEL_TITLE_STYLE) {
+        // TAP 留给 action_at 选样式；只在这里接住纵向移动与手势收尾。
+        // TAP stays with action_at for picking a style; only vertical motion and gesture ends land here.
+        if (ev->type == UI_GESTURE_PRESS) {
+            s_pressed_control = -1;
+            s_title_style_drag = false;
+            return APP_REDRAW_NONE;
+        }
+        if (ev->type == UI_GESTURE_CANCEL) { s_title_style_drag = false; return APP_REDRAW_NONE; }
+        if (ev->type == UI_GESTURE_MOVE || ev->type == UI_GESTURE_SWIPE_U ||
+            ev->type == UI_GESTURE_SWIPE_D)
+            return title_style_scroll_gesture(ctx, ev);
     }
     if (reader_tools_swipe(ctx, ev)) return APP_REDRAW_PAGE;
     bool input_feedback = false;

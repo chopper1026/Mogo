@@ -16,3 +16,5 @@ void ttf_draw_text_px(uint8_t *fb, int x, int y, int px, const char *text, enum 
 void ttf_draw_text_px_bw(uint8_t *fb, int x, int y, int px, const char *text, enum EpdFontFlags align, uint8_t fg, uint8_t bg);
 void ttf_set_antialias(bool enabled);
 bool ttf_get_antialias(void);
+int ttf_get_stroke_adjust_fine(void);
+void ttf_set_stroke_adjust_fine_scoped(int steps);

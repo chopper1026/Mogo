@@ -94,9 +94,10 @@ typedef struct {uint16_t x,y;} Coord_xy;
 #define UI_CLICK_BACK 2
 #define UI_ICON_CHEVRON_RIGHT 1
 #define UI_ICON_CHEVRON_LEFT 2
-// 预览只走 TTF：内建位图字体的分支在这里换成同尺寸的真字体调用。
-// Previews go through the TTF only: the builtin-bitmap branches are redirected to the real face.
-static bool title_uses_active_font(const char *s){(void)s;return false;}
+// 预览走真实 TTF 路径，和用户导入字体时设备上的画法一致；加粗也走覆盖率膨胀。
+// Previews take the real TTF path, matching the device when a user font is active, so the bold
+// also goes through the coverage dilation.
+static bool title_uses_active_font(const char *s){(void)s;return true;}
 static bool ui_font_has_text(const char *s){(void)s;return true;}
 static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
 // 补充位图字面：默认没有；用例里置真来验证「整行走补充基准字号」的接线。
@@ -127,10 +128,14 @@ def geometry_slices():
 
 
 def kit_slices():
-    return ''.join(function(n, KIT) + '\n' for n in (
+    # 加粗步长取真实源码，预览与固件不会各调一个值。
+    # The bold step count comes from the real source so the preview cannot tune a different value.
+    unit = re.search(r'#define UI_TITLE_BOLD_STEPS \d+', KIT.read_text()).group(0) + '\n'
+    return unit + ''.join(function(n, KIT) + '\n' for n in (
         'clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
         'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width',
         'title_face_px', 'ui_text_title_fit_sized', 'ui_text_title_fit', 'ui_text_title_vc',
+        'ui_text_title_bold_vc',
         'ui_text_title_measure_sized', 'ui_text_title_measure', 'ui_text_title_ink_vc'))
 
 
@@ -177,8 +182,8 @@ def style_unit():
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
     # The band's top margin and the size levels come from the real source too; the geometry scales
     # with them.
-    unit += ''.join(m + '\n' for m in re.findall(r'#define READER_HEADING_BLOCK_\w+ \d+',
-                                                 BOOK.read_text()))
+    unit += ''.join(m + '\n' for m in re.findall(
+        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX) \d+', BOOK.read_text()))
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
                                                  (ROOT / 'main/settings.h').read_text()))
     unit += geometry_slices()
@@ -217,6 +222,7 @@ def panel_unit():
                                                  (ROOT / 'main/settings.h').read_text()))
     unit += r'''
 static unsigned style_selected=3;
+static int s_title_style_scroll;
 static bool book_vertical;
 static int book_kind_value=BOOK_KIND_EPUB;
 static unsigned app_settings_book_title_style(void){return style_selected;}
@@ -241,8 +247,8 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     # 带顶边距与字号档位也取真实源码：题头几何按它们缩放。
     # The band's top margin and the size levels come from the real source too; the geometry scales
     # with them.
-    unit += ''.join(m + '\n' for m in re.findall(r'#define READER_HEADING_BLOCK_\w+ \d+',
-                                                 BOOK.read_text()))
+    unit += ''.join(m + '\n' for m in re.findall(
+        r'#define READER_HEADING_(?:BLOCK_\w+|BOLD_PX) \d+', BOOK.read_text()))
     unit += string_table(BOOK, 's_title_style_names')
     unit += string_table(BOOK, 's_title_style_details')
     # 面板的几何常量从源码取，卡片与窗口位置不另抄。
@@ -252,17 +258,18 @@ static void ui_draw_icon(uint8_t *fb,int cx,int cy,int px,int icon,uint8_t gray)
     unit += geometry_slices()
     # 面板与题头同序：说明行、卡片矩形、样式名都先定义，再用到面板绘制里。
     # Same order as the heading: note line, card rectangles and style names come before the panel.
-    for n in ('reader_panel_text_vc', 'draw_sheet', 'draw_sheet_back',
+    for n in ('reader_panel_text_vc', 'draw_sheet', 'draw_sheet_back', 'title_style_slot_y',
               'title_style_card_rect', 'title_style_window_rect', 'reader_title_style_name',
               'title_style_note', 'title_style_preview_label', 'title_style_preview_title',
               'heading_size_rect', 'draw_heading_size_row', 'draw_title_style_picker'):
         unit += function(n, BOOK) + '\n'
     unit += r'''
 int main(int argc,char **argv){
- assert(argc==6);assert(ttf_font_open(argv[1])==ESP_OK);
+ assert(argc==7);assert(ttf_font_open(argv[1])==ESP_OK);
  style_selected=(unsigned)atoi(argv[2]);
  book_vertical=atoi(argv[3])!=0;
  book_kind_value=atoi(argv[4]);
+ s_title_style_scroll=atoi(argv[6]);
  uint8_t *fb=malloc(684*1216/2);assert(fb);
  memset(fb,0xff,684*1216/2);
  draw_title_style_picker(fb);
@@ -294,6 +301,10 @@ def main():
     # which is how the before/after sheets are laid out.
     parser.add_argument('--size', type=int, default=0)
     parser.add_argument('--band', type=int, default=0)
+    # 滚动量：面板只有三档，给数就按那一档画，用来核对落点不切卡。
+    # Scroll offset: the sheet has three positions; any given value paints that one for checking
+    # that no card is ever cut.
+    parser.add_argument('--scroll', type=int, default=0)
     parser.add_argument('--full', action='store_true', help='每个样式另存整页 PNG')
     args = parser.parse_args()
 
@@ -333,9 +344,10 @@ def main():
                                               ('picker-vertical-note', 3, 1, 1)):
             target = work / f'panel-{tag}.raw'
             subprocess.run([str(work / 'test'), str(args.font.resolve()), str(selected),
-                            str(vertical), str(kind), str(target)], check=True)
+                            str(vertical), str(kind), str(target), str(args.scroll)], check=True)
+            suffix = '' if not args.scroll else f'-scroll{args.scroll}'
             paper(Image.frombytes('L', (684, 1216), target.read_bytes())).save(
-                out.with_name(f'{tag}.png'))
+                out.with_name(f'{tag}{suffix}.png'))
 
     print(f"saved {out}, {len(STYLES)} single-style PNGs and 3 picker renders next to it"
           + (f" (size {args.size or 'source'}, band {args.band or 'source'})" if args.size or args.band else ""))

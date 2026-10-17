@@ -2101,6 +2101,16 @@ void ttf_set_stroke_adjust_fine(int steps) {
     s_stroke_adjust=steps;cache_clear_all();
 }
 int ttf_get_stroke_adjust_fine(void) {return s_stroke_adjust;}
+// 有界绘制用的临时值：只改当前笔画，不丢缓存。缓存条目本来就按笔画分别命中，
+// 所以正文与加粗标题的字形可以同时驻留；调用方画完必须恢复原值。
+// Temporary value for a bounded paint: it only changes the current stroke and keeps the cache.
+// Entries are already keyed by stroke, so body and bold-title glyphs coexist; the caller must
+// restore the previous value after painting.
+void ttf_set_stroke_adjust_fine_scoped(int steps) {
+    if(steps < -32)steps=-32;
+    if(steps > 32)steps=32;
+    s_stroke_adjust=steps;
+}
 void ttf_set_stroke_adjust(int level) {
     if(level < -2)level=-2;
     if(level > 2)level=2;

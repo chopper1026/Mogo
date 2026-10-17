@@ -175,6 +175,10 @@ void ttf_set_stroke_adjust(int level);
 int ttf_get_stroke_adjust(void);
 /// 1/16像素笔画覆盖率微调，不改变字宽。/ Adjust stroke coverage in 1/16-pixel steps without changing advances.
 void ttf_set_stroke_adjust_fine(int steps);
+/// 同上，但有界绘制用：改值不丢弃字形缓存，画完由调用方恢复；缓存按笔画分别命中。
+/// Same scale for a bounded paint: changes the value without dropping the glyph cache, and the
+/// caller restores it; entries are keyed by stroke so both variants coexist.
+void ttf_set_stroke_adjust_fine_scoped(int steps);
 int ttf_get_stroke_adjust_fine(void);
 /// 绘制时使用灰阶覆盖或二值边缘，复用同一份字形缓存，不改变字宽。/ Select gray coverage or binary edges while drawing, reusing glyphs without changing advances.
 void ttf_set_antialias(bool enabled);

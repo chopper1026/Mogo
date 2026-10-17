@@ -56,6 +56,8 @@ size_step = numeric('APP_BOOK_TITLE_SIZE_STEP', settings)
 size_default = numeric('APP_BOOK_TITLE_SIZE_DEFAULT', settings)
 block_top = numeric('READER_HEADING_BLOCK_TOP', book)
 block_height = numeric('READER_HEADING_BLOCK_HEIGHT', book)
+bold_px = numeric('READER_HEADING_BOLD_PX', book)
+bold_steps = numeric('UI_TITLE_BOLD_STEPS', kit)
 LEVELS = list(range(size_min, size_max + 1, size_step))
 
 with tempfile.TemporaryDirectory() as folder:
@@ -104,7 +106,8 @@ typedef struct {uint16_t x,y;} Coord_xy;
 #define UI_INK_WHITE 15
 // 宿主只走 TTF：内建位图字体分支换成同尺寸的真字体调用。
 // The host goes through the TTF only: builtin-bitmap branches are redirected to the real face.
-static bool title_uses_active_font(const char *s){(void)s;return false;}
+static bool s_active_face;
+static bool title_uses_active_font(const char *s){(void)s;return s_active_face;}
 static bool ui_font_has_text(const char *s){(void)s;return true;}
 static int ui_font_title_px(int preferred,const char *s){(void)s;return preferred;}
 // 补充位图字面：默认没有；用例里置真来验证「整行走补充基准字号」的接线。
@@ -126,13 +129,16 @@ void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
     for n in ('clamp_radius', 'draw_arc', 'ui_draw_round_rect', 'ui_fill_round_rect', 'ui_inset_rect',
               'ui_draw_control_frame', 'ui_draw_separator', 'ui_hairline', 'ui_content_width'):
         unit += function(n, kit) + '\n'
+    unit += f'#define UI_TITLE_BOLD_STEPS {bold_steps}\n'
     for n in ('title_face_px', 'ui_text_title_fit_sized', 'ui_text_title_fit', 'ui_text_title_vc',
-              'ui_text_title_measure_sized', 'ui_text_title_measure', 'ui_text_title_ink_vc'):
+              'ui_text_title_bold_vc', 'ui_text_title_measure_sized', 'ui_text_title_measure',
+              'ui_text_title_ink_vc'):
         unit += function(n, kit) + '\n'
     unit += styles.group(0) + '\n'
     unit += band.group(0) + '\n'
     unit += f'#define READER_HEADING_BLOCK_TOP {block_top}\n'
     unit += f'#define READER_HEADING_BLOCK_HEIGHT {block_height}\n'
+    unit += f'#define READER_HEADING_BOLD_PX {bold_px}\n'
     unit += f'#define BAND_HEIGHT_EXPECTED {band_height}\n'
     unit += ''.join(m + '\n' for m in re.findall(r'#define APP_BOOK_TITLE_SIZE_\w+ \d+',
                                                 settings.read_text()))
@@ -144,15 +150,17 @@ void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer);
 uint8_t ui_contrast_gray(uint8_t gray){return gray;}
 void ui_fill_rect_fast(EpdRect rect,uint8_t gray,uint8_t *framebuffer){epd_fill_rect(rect,gray,framebuffer);}
 // 改样式之前 draw_reader_outer 里那段横排题头：默认样式必须与它逐像素一致。
+// 章名走合成加粗，所以基准也按同一截短宽度与加粗绘制。
 // The inline horizontal heading draw_reader_outer used before styles existed: the default style has
-// to match it pixel for pixel.
+// to match it pixel for pixel. The title is synthetically bold, so the baseline fits and paints it
+// the same way.
 static void historical_plain(uint8_t *fb,EpdRect body){
     char heading[128];copy_text(heading,sizeof(heading),s_chapter_heading_title);
-    int heading_px=ui_text_title_fit(heading,48,ui_content_width(),s_chapter_heading_title);
+    int heading_px=ui_text_title_fit(heading,48,ui_content_width()-READER_HEADING_BOLD_PX,s_chapter_heading_title);
     char label[sizeof(s_chapter_heading_label)];copy_text(label,sizeof(label),s_chapter_heading_label);
     int label_px=ui_text_title_fit(label,24,ui_content_width(),s_chapter_heading_label);
     ui_text_title_vc(fb,UI_LOCK_WIDTH/2,body.y+29,label_px,label,s_chapter_heading_label,EPD_DRAW_ALIGN_CENTER);
-    ui_text_title_vc(fb,UI_LOCK_WIDTH/2,body.y+112,heading_px,heading,s_chapter_heading_title,EPD_DRAW_ALIGN_CENTER);
+    ui_text_title_bold_vc(fb,UI_LOCK_WIDTH/2,body.y+112,heading_px,heading,s_chapter_heading_title,EPD_DRAW_ALIGN_CENTER);
     ui_hairline(fb,body.y+174,210,264,UI_GRAY_LIGHT);
 }
 static const size_t FB_BYTES=(size_t)UI_LOCK_WIDTH*UI_LOCK_HEIGHT/2;
@@ -174,15 +182,19 @@ static bool equals_shifted(const uint8_t *moved,const uint8_t *origin,int dy){
     }
     return true;
 }
-// 墨迹范围：题头带内的最上、最下、最左、最右非白像素。
-// Ink extents: the topmost, lowest, leftmost and rightmost non-white pixel of the heading band.
-static void ink_bounds(const uint8_t *fb,int *top,int *bottom,int *left,int *right){
+// 墨迹范围：题头带内的最上、最下、最左、最右非白像素；阈值用来区分纯黑与任意灰。
+// Ink extents: the topmost, lowest, leftmost and rightmost non-white pixel of the heading band; the
+// threshold separates solid black from any gray.
+static void ink_bounds_at(const uint8_t *fb,int limit,int *top,int *bottom,int *left,int *right){
     *top=INT32_MAX;*bottom=-1;*left=INT32_MAX;*right=-1;
     for(int y=0;y<UI_LOCK_HEIGHT;++y)for(int x=0;x<UI_LOCK_WIDTH;++x)
-        if(pixel_at(fb,x,y)<15){
+        if(pixel_at(fb,x,y)<limit){
             if(y<*top)*top=y;if(y>*bottom)*bottom=y;
             if(x<*left)*left=x;if(x>*right)*right=x;
         }
+}
+static void ink_bounds(const uint8_t *fb,int *top,int *bottom,int *left,int *right){
+    ink_bounds_at(fb,15,top,bottom,left,right);
 }
 struct heading_case_t { const char *label; const char *title; };
 static const struct heading_case_t CASES[]={
@@ -241,6 +253,44 @@ int main(int argc,char **argv){
             assert(0);
         }
     }
+    // 合成加粗（真实 TTF 路径）：覆盖率膨胀，单次抗锯齿；墨量至少多三成，四周各向扩展，
+    // 画完恢复原来的阅读字重，不留下全局笔画状态。
+    // Synthetic bold on the real TTF path: a coverage dilation rasterized once. Ink grows by at
+    // least thirty percent, the bounds grow on every side, and the reader's stroke setting is
+    // restored afterwards so no global state leaks.
+    {
+        const char *sample="远方来信";
+        s_active_face=true;
+        ttf_set_stroke_adjust_fine(0);
+        memset(plain,0xff,FB_BYTES);
+        ui_text_title_vc(plain,UI_LOCK_WIDTH/2,400,48,sample,sample,EPD_DRAW_ALIGN_CENTER);
+        memset(styled,0xff,FB_BYTES);
+        ui_text_title_bold_vc(styled,UI_LOCK_WIDTH/2,400,48,sample,sample,EPD_DRAW_ALIGN_CENTER);
+        assert(ttf_get_stroke_adjust_fine()==0);
+        int rt,rb,rl,rr,bt,bb,bl,br;
+        ink_bounds_at(plain,FRAME_PAPER,&rt,&rb,&rl,&rr);
+        ink_bounds_at(styled,FRAME_PAPER,&bt,&bb,&bl,&br);
+        assert(rt>=0&&bt>=0);
+        if(!(bl<=rl&&br>=rr&&bt<=rt&&bb>=rb)){
+            fprintf(stderr,"bold lost an edge: %d..%d x %d..%d vs %d..%d x %d..%d\n",
+                    bt,bb,bl,br,rt,rb,rl,rr);
+            assert(0);
+        }
+        long regular_ink=0,bold_ink=0;
+        for(int y=0;y<UI_LOCK_HEIGHT;++y)for(int x=0;x<UI_LOCK_WIDTH;++x){
+            regular_ink+=FRAME_PAPER-pixel_at(plain,x,y);
+            bold_ink+=FRAME_PAPER-pixel_at(styled,x,y);
+        }
+        // 至少 +28%：用户要求肉眼可辨，实测值见下方输出。
+        // At least +28%: the user asked for a visible difference; the measured ratio is printed below.
+        if(bold_ink*100<regular_ink*128){
+            fprintf(stderr,"bold coverage %ld vs regular %ld (%ld%%)\n",
+                    bold_ink,regular_ink,bold_ink*100/regular_ink);
+            assert(0);
+        }
+        fprintf(stderr,"bold coverage +%ld%%\n",bold_ink*100/regular_ink-100);
+        s_active_face=false;
+    }
     // 含补充位图字面的行整行取补充基准（档位/2），所以编号永远不会比章名大。
     // A line carrying a bitmap supplement takes the supplement base (level/2), so the label can never
     // overtake the title.
@@ -256,7 +306,7 @@ int main(int argc,char **argv){
         }
     }
     s_font_has_supplement=false;
-    printf("PASS: %u heading combinations (%u inputs x %d styles x %d sizes) inside the %d px band; the default %d px is the historical block shifted %d px to the band's centre, supplement lines stay at level/2\n",
+    printf("PASS: %u heading combinations (%u inputs x %d styles x %d sizes) inside the %d px band; the default %d px is the historical block shifted %d px to the band's centre, the title is synthetically bold, supplement lines stay at level/2\n",
            combos,(unsigned)(sizeof(CASES)/sizeof(CASES[0])),APP_BOOK_TITLE_STYLE_COUNT,
            (APP_BOOK_TITLE_SIZE_MAX-APP_BOOK_TITLE_SIZE_MIN)/APP_BOOK_TITLE_SIZE_STEP+1,
            READER_HEADING_BAND_HEIGHT,APP_BOOK_TITLE_SIZE_DEFAULT,CENTER_SHIFT);
