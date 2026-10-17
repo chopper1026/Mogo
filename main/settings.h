@@ -235,7 +235,7 @@ void app_settings_set_book_reading_line_offset(int8_t offset_px);
 /// 阅读行高百分比，110..150。/ Reader line-height percentage: 110..150.
 uint8_t app_settings_book_line_spacing(void);
 void app_settings_set_book_line_spacing(uint8_t percent);
-/// 阅读页左右边距，0..48 像素。/ Reader horizontal margin: 0..48 pixels.
+/// 阅读页左右边距，0..60 像素；界面按 2 像素一档。/ Reader horizontal margin: 0..60 pixels, 2 px per UI step.
 uint8_t app_settings_book_margin(void);
 void app_settings_set_book_margin(uint8_t px);
 /// 段后距离百分比，0/25/50/75。/ Paragraph-gap percentage: 0/25/50/75.

@@ -175,8 +175,9 @@
 #define BOOK_PX_MAX 72
 #define BOOK_PX_STEP 4
 #define BOOK_MARGIN_MIN 0
-#define BOOK_MARGIN_MAX 48
-#define BOOK_MARGIN_CHOICES 9
+#define BOOK_MARGIN_MAX 60
+#define BOOK_MARGIN_STEP 2
+#define BOOK_MARGIN_CHOICES ((BOOK_MARGIN_MAX - BOOK_MARGIN_MIN) / BOOK_MARGIN_STEP + 1)
 #define BOOK_TOOL_COUNT 6
 #define BOOK_FONT_PAGE 9
 #define BOOKMARK_MAX 24
@@ -494,74 +495,41 @@ static EpdRect reader_fullscreen_progress_area(void) {
     return (EpdRect){0, READER_FULLSCREEN_PROGRESS_TOP,
                      UI_LOCK_WIDTH, UI_LOCK_HEIGHT - READER_FULLSCREEN_PROGRESS_TOP};
 }
-static EpdRect body_rect_for_tracking(int tracking_index) {
+static EpdRect body_rect(void) {
     int top = s_reader_fullscreen
         ? (app_settings_reader_statusbar() ? 96 : 24)
         : (app_settings_reader_statusbar() ? 176 : 96);
     int margin = s_margin;
     // Leave only a narrow strip for the full-book progress line in full screen.
     int bottom = s_reader_fullscreen ? READER_FULLSCREEN_PROGRESS_TOP - 2 : UI_BAR_TOP + 39;
-    int tracking = (tracking_index - 2) * 2;
-    // 竖排把「边距」放到上下两端，左右只留一条窄边；整字收齐的是列高，不是行宽。
-    // Vertical setting moves the margin setting to the top and bottom edges, keeps a narrow side
-    // inset, and rounds the column height to whole glyphs instead of rounding a line's width.
-    if (app_settings_book_vertical()) {
-        EpdRect upright = {24, top + margin, UI_LOCK_WIDTH - 48, bottom - top - 2 * margin};
-        EpdRect turned = book_layout_balanced_rect(
-            (EpdRect){upright.y, upright.x, upright.height, upright.width}, s_px, tracking);
-        return (EpdRect){turned.y, turned.x, turned.height, turned.width};
-    }
-    EpdRect outer = {margin, top, UI_LOCK_WIDTH - 2 * margin, bottom - top};
-    return book_layout_balanced_rect(outer, s_px, tracking);
+    // 边距是真实留白：栏宽不再吸附整字格，完整行把行尾余量摊到字间，左右留白保持相等。
+    // The margin is a real inset: the column no longer snaps to whole glyph cells, and each
+    // full line spreads its spare width between glyphs so both side margins stay equal.
+    // 竖排把「边距」放到上下两端，左右只留一条窄边；列高同样不再吸附整字格。
+    // Vertical setting moves the margin to the top and bottom edges and keeps a narrow side
+    // inset; the column height no longer snaps to whole glyph cells either.
+    if (app_settings_book_vertical())
+        return (EpdRect){24, top + margin, UI_LOCK_WIDTH - 48, bottom - top - 2 * margin};
+    return (EpdRect){margin, top, UI_LOCK_WIDTH - 2 * margin, bottom - top};
 }
-static EpdRect body_rect(void) {
-    return body_rect_for_tracking(app_settings_book_tracking());
-}
-static int reader_margin_width(int margin, int px, int tracking_px) {
-    EpdRect outer = {margin, 0, UI_LOCK_WIDTH - 2 * margin, 1};
-    return book_layout_balanced_rect(outer, px, tracking_px).width;
-}
-static int reader_margin_levels(int px, int tracking_px,
-                                int widths[BOOK_MARGIN_CHOICES], int values[BOOK_MARGIN_CHOICES]) {
-    int count = 0;
-    for (int i = 0; i < BOOK_MARGIN_CHOICES; ++i) {
-        int value = BOOK_MARGIN_MIN + i * 6;
-        int width = reader_margin_width(value, px, tracking_px);
-        if (!count || widths[count-1] != width) {
-            widths[count] = width;
-            values[count++] = value;
-        } else if (count > 1 && abs(value - 24) < abs(values[count-1] - 24)) {
-            values[count-1] = value;
-        }
-    }
-    // 同字格宽度只显示一个档位；极值仍到0/48，已有边距不因重画滑杆改写。
-    // Show one stop per distinct column width, retaining the 0/48 extremes and existing saved margins.
-    values[0] = BOOK_MARGIN_MIN;
-    if (count > 1) values[count-1] = BOOK_MARGIN_MAX;
-    return count;
-}
-static int reader_margin_level_for(int margin, int px, int tracking_px) {
+// 边距档位：0..60 每 2 像素一档，保存值就是真实留白。
+// Margin stops: 0..60 in 2 px steps; the saved value is the real inset.
+static int reader_margin_level(int margin) {
     if (margin < BOOK_MARGIN_MIN) margin = BOOK_MARGIN_MIN;
     if (margin > BOOK_MARGIN_MAX) margin = BOOK_MARGIN_MAX;
-    int widths[BOOK_MARGIN_CHOICES], values[BOOK_MARGIN_CHOICES];
-    int count = reader_margin_levels(px, tracking_px, widths, values);
-    int width = reader_margin_width(margin, px, tracking_px);
-    for (int i = 0; i < count; ++i) if (width >= widths[i]) return i;
-    return count - 1;
+    return (margin - BOOK_MARGIN_MIN + BOOK_MARGIN_STEP / 2) / BOOK_MARGIN_STEP;
 }
-static int reader_margin_for_level(int level, int current, int px, int tracking_px) {
-    int widths[BOOK_MARGIN_CHOICES], values[BOOK_MARGIN_CHOICES];
-    int count = reader_margin_levels(px, tracking_px, widths, values);
+static int reader_margin_for_level(int level) {
     if (level < 0) level = 0;
-    if (level >= count) level = count - 1;
-    return level == reader_margin_level_for(current, px, tracking_px) ? current : values[level];
+    if (level >= BOOK_MARGIN_CHOICES) level = BOOK_MARGIN_CHOICES - 1;
+    return BOOK_MARGIN_MIN + level * BOOK_MARGIN_STEP;
 }
 static EpdRect progress_rect(void) {
     // 阅读页没有右侧菜单按钮；进度信息应和页眉分隔线一样铺满内容宽度。
     // 页脚整体贴底：带上沿 = 正文底（UI_BAR_TOP+39=1135），高 57 到 1192。进度条 =
     // track.y+8（1143–1155），章节名行顶 = track.y+27（行底约 1186，距屏底 30px），条距
     // 正文保持 8px。正文底、页脚刷新带、绘制基准共用本矩形；39 为页脚贴底下调量，
-    // 调整时须与 reader_area/body_rect_for_tracking 的 bottom 三处联动。
+    // 调整时须与 reader_area/body_rect 的 bottom 三处联动。
     // The reader has no right-hand menu button; the footer spans the full content width.
     // The whole footer hugs the bottom edge: band top = body bottom (1135), height 57 to 1192;
     // bar at track.y+8 (1143–1155), chapter text top at track.y+27 (bottom ≈1186, 30 px above
@@ -2253,12 +2221,8 @@ static void draw_layout_settings(uint8_t* fb) {
     int shown_line = s_reader_slider >= 0 ? s_reader_preview_line : app_settings_book_line_spacing();
     int shown_para = s_reader_slider >= 0 ? s_reader_preview_para : app_settings_book_paragraph_spacing();
     int shown_tracking = s_reader_slider >= 0 ? s_reader_preview_tracking : app_settings_book_tracking();
-    int margin_widths[BOOK_MARGIN_CHOICES], margin_values[BOOK_MARGIN_CHOICES];
-    int margin_count = reader_margin_levels(s_px, (shown_tracking - 2) * 2,
-                                             margin_widths, margin_values);
     draw_pill_slider(fb, reader_slider_rect(1), "小", "大", "边距",
-                     reader_margin_level_for(shown_margin, s_px, (shown_tracking - 2) * 2),
-                     margin_count, 21, 21);
+                     reader_margin_level(shown_margin), BOOK_MARGIN_CHOICES, 21, 21);
     int line_i = shown_line - 110;
     if (line_i < 0) line_i = 0;
     if (line_i > 40) line_i = 40;
@@ -4863,7 +4827,7 @@ static app_redraw_t apply_reader_typography(app_ctx_t* ctx, int tracking_index) 
     invalidate_prep();
     book_layout_set_typography((tracking_index - 2) * 2);
     bool ok = book_layout_build_blocks(s_text, s_text_len, s_blocks, s_block_count,
-                                       body_rect_for_tracking(tracking_index), s_px);
+                                       body_rect(), s_px);
     if (ok) s_page = book_layout_page_for_offset(off);
     else {
         book_layout_set_typography((old_index - 2) * 2);
@@ -5072,14 +5036,12 @@ static int slider_index(EpdRect rect, int x, int count) {
     if (index >= count) index = count - 1;
     return index;
 }
-static int reader_margin_input(EpdRect rect, int x, int current, int px, int tracking_px) {
-    int widths[BOOK_MARGIN_CHOICES], values[BOOK_MARGIN_CHOICES];
-    int count = reader_margin_levels(px, tracking_px, widths, values);
-    int level = reader_margin_level_for(current, px, tracking_px);
+static int reader_margin_input(EpdRect rect, int x, int current) {
+    int level = reader_margin_level(current);
     if (x < rect.x + 64) --level;
     else if (x >= rect.x + rect.width - 64) ++level;
-    else level = slider_index(rect, x, count);
-    return reader_margin_for_level(level, current, px, tracking_px);
+    else level = slider_index(rect, x, BOOK_MARGIN_CHOICES);
+    return reader_margin_for_level(level);
 }
 
 static EpdRect reader_slider_rect(int slider) {
@@ -5102,13 +5064,9 @@ static int reader_slider_at(uint16_t x, uint16_t y) {
 
 static void reader_slider_map(int slider, int x) {
     if (slider == 0) s_reader_preview_px = BOOK_PX_MIN + slider_index(reader_slider_rect(0), x, 37);
-    else if (slider == 1) {
-        int widths[BOOK_MARGIN_CHOICES], values[BOOK_MARGIN_CHOICES];
-        int count = reader_margin_levels(s_px, (app_settings_book_tracking() - 2) * 2, widths, values);
+    else if (slider == 1)
         s_reader_preview_margin = reader_margin_for_level(
-            slider_index(reader_slider_rect(1), x, count), s_reader_preview_margin,
-            s_px, (app_settings_book_tracking() - 2) * 2);
-    }
+            slider_index(reader_slider_rect(1), x, BOOK_MARGIN_CHOICES));
     else if (slider == 2) s_reader_preview_line = 110 + slider_index(reader_slider_rect(2), x, 41);
     else if (slider == 3) s_reader_preview_para = slider_index(reader_slider_rect(3), x, 4) * 25;
     else if (slider == 4) s_reader_preview_tracking = slider_index(reader_slider_rect(4), x, 5);
@@ -5127,7 +5085,7 @@ static void reader_slider_begin(int slider, int x) {
                  &s_reader_preview_tracking;
     s_reader_slider_endpoint = x < rect.x + 64 || x >= rect.x + rect.width - 64;
     if (slider == 1) {
-        *value = reader_margin_input(rect, x, *value, s_px, (app_settings_book_tracking() - 2) * 2);
+        *value = reader_margin_input(rect, x, *value);
         return;
     }
     int min = slider == 0 ? BOOK_PX_MIN : slider == 2 ? 110 : 0;
@@ -5451,8 +5409,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         EpdRect tracking = reader_slider_rect(4);
         if (ui_rect_hit(margin, x, y)) {
             return apply_reader_layout(ctx, s_px,
-                                       reader_margin_input(margin, x, s_margin, s_px,
-                                                           (app_settings_book_tracking() - 2) * 2),
+                                       reader_margin_input(margin, x, s_margin),
                                        app_settings_book_line_spacing(), app_settings_book_paragraph_spacing());
         }
         if (ui_rect_hit(line, x, y)) {

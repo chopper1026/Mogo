@@ -299,16 +299,6 @@ void book_layout_set_first_line_indent(unsigned em) {
 void book_layout_set_first_line_indent_adjust(int px) {
     s_first_line_indent_adjust_px = px >= -20 && px <= 20 ? px : 0;
 }
-EpdRect book_layout_balanced_rect(EpdRect outer, int px, int tracking_px) {
-    if (px <= 0 || outer.width < px || tracking_px < -4 || tracking_px > 4) return outer;
-    int step = px + tracking_px;
-    if (step <= 0) return outer;
-    int columns = 1 + (outer.width - px) / step;
-    int used = px + (columns - 1) * step;
-    outer.x += (outer.width - used) / 2;
-    outer.width = used;
-    return outer;
-}
 void book_layout_set_reading_line(unsigned style) {
     s_reading_line = style <= 2 ? style : 0;
 }

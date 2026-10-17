@@ -368,7 +368,7 @@ void app_settings_init(void) {
     }
     if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && para <= 75 && para % 25 == 0) s_book_para = para;
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK && margin <= 60)
-        s_book_margin = margin > 48 ? 48 : margin;
+        s_book_margin = margin;
     uint8_t shelf_style = 2;
     if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 5)
         s_shelf_style = shelf_style == 3 || shelf_style == 4 ? 2 : shelf_style;
@@ -867,7 +867,7 @@ void app_settings_set_book_line_spacing(uint8_t percent) {
 }
 uint8_t app_settings_book_margin(void) { return s_book_margin; }
 void app_settings_set_book_margin(uint8_t px) {
-    if (px > 48 || s_book_margin == px) return;
+    if (px > 60 || s_book_margin == px) return;
     s_book_margin = px;
     nvs_put_u8(NVS_KEY_BOOK_MARGIN, px);
 }
@@ -1375,7 +1375,7 @@ esp_err_t app_settings_backup_restore(void) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 48 ? 48 : backup.flags[BK_MARGIN];
+    backup.flags[BK_MARGIN] = backup.flags[BK_MARGIN] > 60 ? 60 : backup.flags[BK_MARGIN];
     if (version < 15) backup.flags[BK_SHAKE] = 0; // 旧晃动标志不改变AA。/ Old shake flags never affect AA.
     // 已删除组件的备份仍可恢复，其余字段不受影响。/ Restore retired widget backups without rejecting other preferences.
     if (home.component == 3) home.component = APP_HOME_CLOCK;

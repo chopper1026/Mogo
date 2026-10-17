@@ -33,8 +33,6 @@ void book_layout_set_typography(int tracking_px);
 void book_layout_set_first_line_indent(unsigned em);
 /// 正文首行按像素微调-20..20，0为默认，不改变标题/对齐块或无缩进。/ Fine-tune body indent by -20..20px; default 0, leaving headings/aligned/no-indent blocks intact.
 void book_layout_set_first_line_indent_adjust(int px);
-/// 把正文宽度收齐到完整汉字列并居中，避免折行余量只堆在右侧。/ Center complete CJK columns so wrap slack does not accumulate on the right.
-EpdRect book_layout_balanced_rect(EpdRect outer, int px, int tracking_px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Reading guides: none, dashed or dotted.
 void book_layout_set_reading_line(unsigned style);
 /// 阅读线相对默认位置上下移动 -8..+8 像素；负值上移。/ Move guide -8..+8 px; negative is up.

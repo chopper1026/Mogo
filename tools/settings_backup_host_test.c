@@ -111,7 +111,8 @@ int main(void) {
     assert(app_settings_reader_hold_action()==APP_READER_KEY_HOME);
     app_settings_set_book_margin(0);assert(app_settings_book_margin()==0);
     app_settings_set_book_margin(24);assert(app_settings_book_margin()==24);
-    app_settings_set_book_margin(49);assert(app_settings_book_margin()==24);
+    app_settings_set_book_margin(60);assert(app_settings_book_margin()==60);
+    app_settings_set_book_margin(61);assert(app_settings_book_margin()==60);
     assert(app_settings_set_book_background_path("/sdcard/pictures/bg.png"));
     assert(!app_settings_set_book_background_path("/sdcard/pictures/../bad.png"));
     has_hold=true;loaded_hold=APP_READER_KEY_REFRESH;

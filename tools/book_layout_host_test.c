@@ -339,11 +339,6 @@ int main(void) {
     assert(book_layout_build_blocks(parsed.utf8,parsed.len,parsed.blocks,parsed.count,(EpdRect){0,0,100,20},10));
     assert(book_layout_page_count()==3);
     book_layout_free();html_text_free(&parsed);
-    EpdRect balanced = book_layout_balanced_rect((EpdRect){36, 0, 612, 100}, 48, 0);
-    assert(balanced.x == 54 && balanced.width == 576);
-    assert(balanced.x == 684 - balanced.x - balanced.width);
-    balanced = book_layout_balanced_rect((EpdRect){36, 0, 612, 100}, 48, 2);
-    assert(balanced.x == 43 && balanced.width == 598);
     r = (EpdRect){0, 0, 100, 100};
     for (unsigned em = 0; em <= 3; ++em) {
         book_layout_set_first_line_indent(em);

@@ -382,8 +382,9 @@ static char test_wrapped[512];
 #define UI_BAR_TOP 1096
 #define UI_BAR_H 96
 #define BOOK_MARGIN_MIN 0
-#define BOOK_MARGIN_MAX 48
-#define BOOK_MARGIN_CHOICES 9
+#define BOOK_MARGIN_MAX 60
+#define BOOK_MARGIN_STEP 2
+#define BOOK_MARGIN_CHOICES ((BOOK_MARGIN_MAX - BOOK_MARGIN_MIN) / BOOK_MARGIN_STEP + 1)
 #define BOOK_PX_MIN 36
 #define BOOK_PX_MAX 72
 #define EPD_DRAW_ALIGN_LEFT 0
@@ -419,10 +420,9 @@ static int s_category_count,s_category_capacity,s_category_selected,s_category_m
 static bool s_category_menu;
 static char s_category_root[288];
 """
-unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
+for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
              "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
@@ -487,50 +487,41 @@ int main(void) {
     for (int gray=0; gray<=255; ++gray)
         assert(inline_ink_gray((uint8_t)gray)==gray);
     EpdRect margin_slider={36,700,294,66};
-    int narrow=reader_margin_input(margin_slider,40,36,48,0);
-    int wide=reader_margin_input(margin_slider,325,36,48,0);
-    assert(reader_margin_width(0,48,0)>reader_margin_width(24,48,0));
-    assert(reader_margin_width(narrow,48,0)>reader_margin_width(36,48,0));
-    assert(wide==36&&reader_margin_width(wide,48,0)==reader_margin_width(36,48,0));
-    assert(reader_margin_level_for(24,72,0)==1&&reader_margin_for_level(1,24,72,0)==24);
-    // 每个字体/字间距下，只展示实际宽度不同的档位，任意旧边距只读保留。
-    // All fonts/tracking values expose distinct visible widths and retain existing margins on a read.
-    for(int px=36;px<=72;++px)for(int tracking=-4;tracking<=4;tracking+=2){
-        int widths[BOOK_MARGIN_CHOICES],values[BOOK_MARGIN_CHOICES];
-        int count=reader_margin_levels(px,tracking,widths,values);
-        assert(count>=2&&count<=BOOK_MARGIN_CHOICES&&values[0]==0&&values[count-1]==48);
-        for(int i=0;i<count;++i){
-            assert(widths[i]==reader_margin_width(values[i],px,tracking));
-            if(i)assert(widths[i-1]>widths[i]&&values[i-1]<values[i]);
-        }
-        for(int margin=0;margin<=48;++margin)
-            assert(reader_margin_for_level(reader_margin_level_for(margin,px,tracking),margin,px,tracking)==margin);
-        for(int i=1;i<count;++i){
-            int smaller=reader_margin_input(margin_slider,40,values[i],px,tracking);
-            assert(reader_margin_width(smaller,px,tracking)>widths[i]);
-        }
+    // 2 像素一档：保存值就是真实留白，滑杆直接映射，不再按字格宽度去重。
+    // 2 px per stop: the saved value is the real inset, mapped straight through without
+    // glyph-width deduplication.
+    assert(reader_margin_level(0)==0&&reader_margin_level(60)==30);
+    assert(reader_margin_for_level(0)==0&&reader_margin_for_level(30)==60);
+    assert(reader_margin_input(margin_slider,40,24)==22);
+    assert(reader_margin_input(margin_slider,325,24)==26);
+    assert(reader_margin_input(margin_slider,100,0)==0);
+    assert(reader_margin_input(margin_slider,266,60)==60);
+    assert(reader_margin_input(margin_slider,183,0)==30);
+    for(int level=0;level<BOOK_MARGIN_CHOICES;++level){
+        int margin=reader_margin_for_level(level);
+        assert(margin==level*2&&margin>=BOOK_MARGIN_MIN&&margin<=BOOK_MARGIN_MAX);
+        assert(reader_margin_level(margin)==level);
     }
-    assert(reader_margin_width(reader_margin_input(margin_slider,325,36,48,-2),48,-2)
-           <=reader_margin_width(36,48,-2));
-    // Actual slider commit must reflow and persist every new small-margin value, not just move the thumb.
+    // 每次提交都要真正重排并保存，而不是只挪滑块。
+    // Actual slider commit must reflow and persist every margin value, not just move the thumb.
     app_ctx_t margin_ctx={0};
-    for(int margin=0;margin<=48;margin+=6){
-        s_margin=margin==0?48:0;test_saved_margin=s_margin;s_px=48;s_page=2;
+    for(int margin=0;margin<=60;margin+=2){
+        s_margin=margin==0?60:0;test_saved_margin=s_margin;s_px=48;s_page=2;
         int before=test_reflows;
         assert(apply_reader_layout(&margin_ctx,48,margin,130,50)==APP_REDRAW_PAGE);
         assert(s_margin==margin&&test_saved_margin==margin&&test_reflows==before+1&&s_page==2);
-        assert(test_reflow_rect.width==reader_margin_width(margin,48,0));
+        assert(test_reflow_rect.width==UI_LOCK_WIDTH-2*margin);
     }
     assert(apply_reader_layout(&margin_ctx,48,-1,130,50)==APP_REDRAW_NONE);
-    assert(apply_reader_layout(&margin_ctx,48,49,130,50)==APP_REDRAW_NONE);
+    assert(apply_reader_layout(&margin_ctx,48,61,130,50)==APP_REDRAW_NONE);
     s_margin=test_saved_margin=24;s_reader_slider_endpoint=false;
-    reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin==0);
-    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==0&&test_saved_margin==0);
+    reader_slider_begin(1,40);assert(s_reader_slider_endpoint&&s_reader_preview_margin==22);
+    assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==22&&test_saved_margin==22);
     s_margin=test_saved_margin=24;s_reader_slider_endpoint=true;
     reader_slider_begin(1,183);assert(!s_reader_slider_endpoint);
     reader_slider_move(100);
     assert(reader_slider_commit(&margin_ctx)==APP_REDRAW_PAGE&&s_margin==0&&test_saved_margin==0);
-    assert(body_rect().width==reader_margin_width(0,48,0));
+    assert(body_rect().width==UI_LOCK_WIDTH);
     s_margin=test_saved_margin=24;test_reflow_failures=1;
     assert(apply_reader_layout(&margin_ctx,48,0,130,50)==APP_REDRAW_NONE);
     assert(s_margin==24&&test_saved_margin==24&&!test_draw_locked);
