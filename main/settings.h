@@ -195,13 +195,16 @@ typedef enum {
 } app_reader_key_action_t;
 /// 三个短按功能，0/1/2对应左/中/右；长按独立配置。/ Short actions indexed left/middle/right, with a separate hold action.
 app_reader_key_action_t app_settings_reader_key_action(unsigned key);
-/// 仅验证按键与动作范围，不强制工具栏映射；3代表中键长按。/ Validate key/action ranges without requiring a toolbar mapping; 3 means middle hold.
+/// 仅验证按键与动作范围，不强制工具栏映射；3代表中键长按，4代表中键双击。/ Validate key/action ranges without requiring a toolbar mapping; 3 is the middle hold and 4 the middle double press.
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action);
 /// 返回是否成功保存；失败不改变映射。/ Return successful persistence, leaving the mapping unchanged on failure.
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action);
 /// 中键长按，默认手动全刷；与短按独立保存。/ Middle hold defaults to full refresh and persists independently.
 app_reader_key_action_t app_settings_reader_hold_action(void);
 bool app_settings_set_reader_hold_action(app_reader_key_action_t action);
+/// 中键双击，默认不操作；绑定后单击需等双击窗口结束才生效。/ Middle double press defaults to no action; once bound, a single click waits for the double-press window.
+app_reader_key_action_t app_settings_reader_double_action(void);
+bool app_settings_set_reader_double_action(app_reader_key_action_t action);
 /// 一次提交整套推荐设置，1为翻页，2为首页/全屏/工具栏。/ Commit preset 1 (page turns) or 2 (Home/full screen/tools) together.
 void app_settings_set_reader_key_preset(unsigned preset);
 /// 旧长按设置API保留用于历史备份兼容。/ Retained legacy hold APIs for historical backup compatibility.

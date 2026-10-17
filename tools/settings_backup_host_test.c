@@ -21,11 +21,11 @@ size_t strlcpy(char *dst, const char *src, size_t cap) {
 #endif
 
 #define APP_SETTINGS_BACKUP_ROOT "build/book-tests/settings-card"
-/* v15..v20 追加的尾部块；旧版本夹具要一并去掉。
-   Tail blocks appended by v15..v20; legacy fixtures drop them all. */
+/* v15..v21 追加的尾部块；旧版本夹具要一并去掉。
+   Tail blocks appended by v15..v21; legacy fixtures drop them all. */
 #define LEGACY_TAIL_BLOCKS (sizeof(settings_backup_background_t) + sizeof(settings_backup_home_t) + \
                             sizeof(settings_backup_open_full_t) + sizeof(settings_backup_title_style_t) + \
-                            sizeof(settings_backup_title_size_t))
+                            sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t))
 #include "../main/settings.c"
 
 static read_pico_transfer_wifi_backup_t saved_wifi = {
@@ -73,6 +73,8 @@ static uint8_t loaded_main_mode;
 static bool has_main_mode;
 static uint8_t loaded_hold=APP_READER_KEY_REFRESH;
 static bool has_hold;
+static uint8_t loaded_double=APP_READER_KEY_NONE;
+static bool has_double;
 static bool keys_v2;
 static uint8_t loaded_weight=2;
 static bool has_weight;
@@ -92,8 +94,8 @@ esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_OPEN_FULL)&&has_open_full){*value=loaded_open_full;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)&&has_double){*value=loaded_double;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_OPEN_FULL)){loaded_open_full=value;has_open_full=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} if(!strcmp(key,NVS_KEY_DOUBLE_ACTION)){loaded_double=value;has_double=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) { (void)h; (void)key; (void)value; (void)size; return ESP_FAIL; }
 esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
 /* rc92 引入的时间同步键走 u32；桩按缺省处理即可（恢复时回退 0）。/ rc92's time-sync keys use u32;
@@ -164,6 +166,10 @@ int main(void) {
     app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     loaded_hold=APP_READER_KEY_TOOLS;has_hold=true;
     app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME && app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
+    loaded_double=APP_READER_KEY_REFRESH;has_double=true;
+    app_settings_init();assert(app_settings_reader_double_action()==APP_READER_KEY_REFRESH);
+    loaded_double=APP_READER_KEY_COUNT;
+    app_settings_init();assert(app_settings_reader_double_action()==APP_READER_KEY_NONE);
     loaded_hold=APP_READER_KEY_REFRESH;app_settings_init();assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
     test_loaded_fast = 1;
     app_settings_init();
@@ -393,9 +399,10 @@ int main(void) {
                                            sizeof(settings_backup_home_t) + sizeof(settings_backup_open_full_t));
     assert(fseek(saved, 0, SEEK_END) == 0);
     long v20_end = ftell(saved);
-    /* 样式块与字号块一起丢掉：v18 两块都没有。 */
-    /* Drop the style and size blocks together: v18 has neither. */
-    const long v20_band = (long)(sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t));
+    /* 样式块、字号块与双击块一起丢掉：v18 三块都没有。 */
+    /* Drop the style, size and double blocks together: v18 has none of them. */
+    const long v20_band = (long)(sizeof(settings_backup_title_style_t) + sizeof(settings_backup_title_size_t) +
+                                 sizeof(settings_backup_double_t));
     size_t v18_tail = (size_t)(v20_end - v18_style_at - v20_band);
     uint8_t *v18_bytes = malloc(v18_tail ? v18_tail : 1);
     assert(v18_bytes);
@@ -442,10 +449,11 @@ int main(void) {
     /* The size block sits between the style block and the reading history: move the history up and
        then truncate, which is what a v19 file without a size block looks like. */
     long v19_size_at = v18_style_at + (long)sizeof(settings_backup_title_style_t);
-    size_t v19_tail = (size_t)(v20_size_end - v19_size_at - (long)sizeof(settings_backup_title_size_t));
+    const long v19_drop = (long)(sizeof(settings_backup_title_size_t) + sizeof(settings_backup_double_t));
+    size_t v19_tail = (size_t)(v20_size_end - v19_size_at - v19_drop);
     uint8_t *v19_bytes = malloc(v19_tail ? v19_tail : 1);
     assert(v19_bytes);
-    assert(fseek(saved, v19_size_at + (long)sizeof(settings_backup_title_size_t), SEEK_SET) == 0 &&
+    assert(fseek(saved, v19_size_at + v19_drop, SEEK_SET) == 0 &&
            fread(v19_bytes, 1, v19_tail, saved) == v19_tail);
     memcpy(legacy_header.magic, "PICOSETJ", 8);
     backup_seal(&legacy_header);
@@ -463,7 +471,7 @@ int main(void) {
     assert(fwrite(v19_bytes, 1, v19_tail, saved) == v19_tail);
     free(v19_bytes);
     assert(fflush(saved) == 0 &&
-           ftruncate(fileno(saved), v20_size_end - (long)sizeof(settings_backup_title_size_t)) == 0 &&
+           ftruncate(fileno(saved), v20_size_end - v19_drop) == 0 &&
            fclose(saved) == 0);
     app_settings_set_book_title_style(APP_BOOK_TITLE_STYLE_EMBLEM);
     app_settings_set_book_title_size(APP_BOOK_TITLE_SIZE_MIN);
@@ -581,6 +589,17 @@ int main(void) {
     app_settings_set_reader_key_preset(1);
     assert(app_settings_backup_restore()==ESP_OK);
     assert(app_settings_reader_key_action(1)==APP_READER_KEY_HOME && app_settings_reader_hold_action()==APP_READER_KEY_TOOLS);
+    // 中键双击与单击/长按一起保存、恢复；提交失败不改内存。
+    // The middle double action saves and restores alongside click/hold, and a failed commit keeps RAM unchanged.
+    assert(app_settings_set_reader_double_action(APP_READER_KEY_FULLSCREEN));
+    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    assert(app_settings_backup_save()==ESP_OK);
+    app_settings_set_reader_double_action(APP_READER_KEY_NONE);
+    assert(app_settings_backup_restore()==ESP_OK);
+    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    commit_fails=true;assert(!app_settings_set_reader_double_action(APP_READER_KEY_HOME));commit_fails=false;
+    assert(app_settings_reader_double_action()==APP_READER_KEY_FULLSCREEN);
+    app_settings_set_reader_double_action(APP_READER_KEY_NONE);
     assert(app_settings_set_reader_hold_action(APP_READER_KEY_NONE));
     // 无工具栏按键的映射在保存、恢复和重启后保持不变；固定上滑入口由阅读控制测试覆盖。
     // A mapping without toolbar keys survives save/restore/reboot; reader-control tests cover the invariant swipe entry.
@@ -590,7 +609,8 @@ int main(void) {
     assert(app_settings_backup_save()==ESP_OK);app_settings_set_reader_key_preset(1);
     assert(app_settings_backup_restore()==ESP_OK);app_settings_init();
     assert(app_settings_reader_hold_action()==APP_READER_KEY_NONE&&app_settings_reader_key_action(1)==APP_READER_KEY_HOME);
-    assert(!app_settings_reader_key_action_allowed(4,APP_READER_KEY_TOOLS));
+    assert(app_settings_reader_key_action_allowed(4,APP_READER_KEY_TOOLS));
+    assert(!app_settings_reader_key_action_allowed(5,APP_READER_KEY_TOOLS));
     assert(!app_settings_reader_key_action_allowed(0,APP_READER_KEY_COUNT));
     app_settings_set_reader_key_preset(1);
     s_book_px = 70;

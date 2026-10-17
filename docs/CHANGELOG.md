@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc95 / 2026-10-17
 
+- rc95 本地测试（2026-10-17）：阅读「按键控制」移除两套推荐设置，腾出的位置新增「中键双击」动作选择，可选上一页/下一页/阅读工具栏/切换全屏/返回主页/手动全刷/不操作，默认不操作。未绑定动作时中键单击仍是原来的即时响应；绑定后单击会等 0.34 秒确认不是双击再执行，窗口内第二次单击触发双击动作。中键长按优先级最高，会取消尚未生效的单击。设置备份升级到 v21，旧备份仍可恢复并把双击回到「不操作」。
+  rc95 local test (2026-10-17): Key control drops the two presets and gains a middle double-press action (previous/next/toolbar/full screen/home/manual refresh/no action, default no action). With nothing bound a middle click stays immediate; once bound it waits 0.34 s to rule out a double press, and a second click inside that window runs the double action. A hold takes precedence and drops the unexpired click. Settings backups move to v21; older backups still restore and return the double press to no action.
+
 - rc95 本地测试（2026-10-17）：标题字号上限由 60 px 提高到 78 px，章名字号现为 36/42/48/54/60/66/72/78 共 8 档（编号仍为一半）。题头带仍是 294 px，78 px 档的细线距带底 13 px；改字号仍只重画当前页，不重排、不跳页。84 px 已贴到带底（只剩 2 px），不再继续上调。
   rc95 local test (2026-10-17): the heading size cap rises from 60 to 78 px, giving eight levels (36/42/48/54/60/66/72/78) with the label still half. The band stays 294 px and the 78 px level keeps 13 px below its closing rule; changing the level still repaints only the current page without re-typesetting or jumping. 84 px leaves only 2 px and is not offered.
 

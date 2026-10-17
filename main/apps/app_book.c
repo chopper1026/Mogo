@@ -12,8 +12,10 @@
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
  * 普通翻页只刷新正文与页脚；手动与周期清残影共用同一条整屏 GC16 全刷。
- * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换，中间双击已取消。
- * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
+ * 用户修订：正文单击按左右各半或上1/3下2/3翻页，不受按键配置影响；全屏由工具栏「全屏」按钮与「切换全屏」按键动作切换。
+ * 用户 2026-10-17 修订：移除按键控制的两套推荐设置，新增中键双击动作，默认不操作；绑定后单击等待 340ms 双击窗口。
+ * User revision 2026-10-17: drop the two key presets and add a configurable middle double press, defaulting to no action; once bound, a single click waits through the 340 ms window.
+ * 三键单击、中键长按与中键双击可自定义；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户授权基础管理：长按书架先看完整详情，清进度与删文件分别确认；失败保留待重试记录，不自动回收其他书进度。
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
@@ -407,6 +409,14 @@ static bool s_cover_batch_present_pending;
 static bool s_shelf_page_pending;
 static unsigned s_reader_key_pick;
 static char s_reader_key_error[64];
+// 中键双击：绑定动作后，单击先挂起一个双击窗口，超时且无触摸才补发。
+// Middle double press: once an action is bound, a single click is held for the double-press
+// window and replayed only after it expires with no contact.
+#define READER_MIDDLE_DOUBLE_MS 340
+static bool s_middle_pending;
+static app_reader_key_action_t s_middle_pending_action;
+static int64_t s_middle_pending_ms;
+static void middle_pending_clear(void) { s_middle_pending = false; }
 static int64_t s_du_ms;
 static unsigned s_du_count;
 static EpdRect s_du_area;
@@ -1564,6 +1574,9 @@ static void set_reader_view(book_view_t view) {
     if (view == READING) app_font_activate_reading();
     else app_font_activate_system();
     s_view = view;
+    // 离开正文时丢弃未到期的中键单击，回来不再补发。
+    // Drop an unexpired middle click when leaving the body so it never replays on return.
+    if (view != READING) middle_pending_clear();
     unlock_draw();
 }
 
@@ -2378,27 +2391,28 @@ static const char *reader_key_label(app_reader_key_action_t action) {
     static const char *const labels[] = {"上一页", "下一页", "阅读工具栏", "切换全屏", "返回主页", "手动全刷", "不操作"};
     return labels[action >= 0 && action < APP_READER_KEY_COUNT ? action : APP_READER_KEY_NONE];
 }
-static EpdRect reader_key_card(unsigned key) { return (EpdRect){36 + (int)key * 208, 506, 196, 114}; }
-static EpdRect reader_key_preset_card(unsigned preset) { return (EpdRect){36, 810 + (int)(preset - 1) * 148, 612, 136}; }
-static bool reader_key_preset_selected(unsigned preset) {
-    static const app_reader_key_action_t actions[2][3] = {
-        {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT},
-        {APP_READER_KEY_HOME, APP_READER_KEY_FULLSCREEN, APP_READER_KEY_TOOLS}
-    };
-    for (unsigned i = 0; i < 3; ++i) if (app_settings_reader_key_action(i) != actions[preset - 1][i]) return false;
-    return app_settings_reader_hold_action() == (preset == 1 ? APP_READER_KEY_HOME : APP_READER_KEY_REFRESH);
-}
+// 面板只占下方三分之二；双击说明收在动作列表里，页面上不再重复。
+// The sheet covers the lower two thirds; the double-press explanation lives in the picker,
+// not on the sheet itself.
+#define KEY_SETTINGS_TOP (UI_LOCK_HEIGHT / 3)
+#define KEY_ICON_Y 545
+#define KEY_LABEL_Y 600
+#define KEY_CARDS_TOP 632
+#define KEY_HOLD_TOP 772
+#define KEY_DOUBLE_TOP 892
+#define KEY_DOUBLE_HEIGHT 72
+static EpdRect reader_key_card(unsigned key) { return (EpdRect){36 + (int)key * 208, KEY_CARDS_TOP, 196, 114}; }
 static void draw_key_settings(uint8_t *fb) {
-    draw_sheet(fb, 270, "按键控制");
-    draw_sheet_back(fb, 270);
+    draw_sheet(fb, KEY_SETTINGS_TOP, "按键控制");
+    draw_sheet_back(fb, KEY_SETTINGS_TOP);
     static const char *const names[] = {"左键", "中键", "右键"};
     for (unsigned i = 0; i < 3; ++i) {
         int cx = 134 + (int)i * 208;
         if (i == 1) {
-            epd_draw_circle(cx, 418, 25, UI_GRAY_BLACK, fb);
-            epd_draw_circle(cx, 418, 24, UI_GRAY_BLACK, fb);
-        } else ui_fill_round_rect(fb, (EpdRect){cx - 26, 415, 52, 6}, 3, UI_GRAY_BLACK);
-        reader_panel_text_vc(fb, cx, 473, 22, names[i], EPD_DRAW_ALIGN_CENTER, false);
+            epd_draw_circle(cx, KEY_ICON_Y, 25, UI_GRAY_BLACK, fb);
+            epd_draw_circle(cx, KEY_ICON_Y, 24, UI_GRAY_BLACK, fb);
+        } else ui_fill_round_rect(fb, (EpdRect){cx - 26, KEY_ICON_Y - 3, 52, 6}, 3, UI_GRAY_BLACK);
+        reader_panel_text_vc(fb, cx, KEY_LABEL_Y, 22, names[i], EPD_DRAW_ALIGN_CENTER, false);
         EpdRect card = reader_key_card(i);
         ui_fill_round_rect(fb, card, 20, 0xf0);
         ui_draw_control_frame(fb, card, 20, 0x58);
@@ -2406,34 +2420,29 @@ static void draw_key_settings(uint8_t *fb) {
         ui_text_box(fb,(EpdRect){card.x+12,card.y+52,card.width-24,52},24,reader_key_label(app_settings_reader_key_action(i)),EPD_DRAW_ALIGN_CENTER,false);
         ui_draw_icon(fb, card.x + card.width - 23, card.y + 24, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     }
-    EpdRect hold = {36, 646, 612, 96};
+    EpdRect hold = {36, KEY_HOLD_TOP, 612, 96};
     ui_fill_round_rect(fb, hold, 20, 0xf0); ui_draw_control_frame(fb, hold, 20, 0x58);
-    ui_text_box(fb,(EpdRect){58,652,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
-    ui_text_box(fb,(EpdRect){322,652,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
-    ui_draw_icon(fb, 625, 679, 20, UI_ICON_CHEVRON_DOWN, 0x38);
-    reader_panel_text(fb, 58, 710, 19, "点击选择长按功能，例如返回主页", EPD_DRAW_ALIGN_LEFT, false);
-    reader_panel_text_vc(fb, 342, 775, 20, "全屏由工具栏按钮或按键动作切换", EPD_DRAW_ALIGN_CENTER, false);
-    for (unsigned preset = 1; preset <= 2; ++preset) {
-        EpdRect card = reader_key_preset_card(preset);
-        bool selected = reader_key_preset_selected(preset);
-        ui_fill_round_rect(fb, card, 20, selected ? 0xd8 : UI_GRAY_WHITE);
-        ui_draw_control_frame(fb, card, 20, 0x58);
-        char title[32]; snprintf(title, sizeof(title), "推荐设置 %u", preset);
-        ui_text_box(fb,(EpdRect){58,card.y+7,344,49},26,title,EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){435,card.y+7,186,49},20,selected?"已应用":"点击应用",EPD_DRAW_ALIGN_RIGHT,false);
-        ui_text_box(fb,(EpdRect){58,card.y+59,564,40},21,preset==1?"左上一页 · 中工具栏 · 右下一页":"左回首页 · 中全屏 · 右工具栏",EPD_DRAW_ALIGN_LEFT,false);
-        ui_text_box(fb,(EpdRect){58,card.y+103,564,34},19,preset==1?"中键长按：返回主页":"中键长按：手动全刷",EPD_DRAW_ALIGN_LEFT,false);
-    }
+    ui_text_box(fb,(EpdRect){58,KEY_HOLD_TOP+6,238,48},26,"中键长按",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,KEY_HOLD_TOP+6,270,48},25,reader_key_label(app_settings_reader_hold_action()),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, KEY_HOLD_TOP + 33, 20, UI_ICON_CHEVRON_DOWN, 0x38);
+    reader_panel_text(fb, 58, KEY_HOLD_TOP + 64, 19, "点击选择长按功能，例如返回主页", EPD_DRAW_ALIGN_LEFT, false);
+    EpdRect dbl = {36, KEY_DOUBLE_TOP, 612, KEY_DOUBLE_HEIGHT};
+    ui_fill_round_rect(fb, dbl, 20, 0xf0); ui_draw_control_frame(fb, dbl, 20, 0x58);
+    ui_text_box(fb,(EpdRect){58,KEY_DOUBLE_TOP+6,238,48},26,"中键双击",EPD_DRAW_ALIGN_LEFT,false);
+    ui_text_box(fb,(EpdRect){322,KEY_DOUBLE_TOP+6,270,48},25,reader_key_label(app_settings_reader_double_action()),EPD_DRAW_ALIGN_RIGHT,false);
+    ui_draw_icon(fb, 625, KEY_DOUBLE_TOP + 33, 20, UI_ICON_CHEVRON_DOWN, 0x38);
     ui_fill_round_rect(fb, (EpdRect){36, 1141, 612, 58}, 20, UI_GRAY_BLACK);
     reader_panel_text_vc(fb, 342, 1170, 26, "完成", EPD_DRAW_ALIGN_CENTER, true);
 }
 static void draw_key_picker(uint8_t *fb) {
-    static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能"};
-    draw_sheet(fb, 270, titles[s_reader_key_pick < 4 ? s_reader_key_pick : 0]);
+    static const char *const titles[] = {"左键功能", "中键功能", "右键功能", "中键长按功能", "中键双击功能"};
+    draw_sheet(fb, 270, titles[s_reader_key_pick < 5 ? s_reader_key_pick : 0]);
     draw_sheet_back(fb, 270);
     for (int i = 0; i < APP_READER_KEY_COUNT; ++i) {
         EpdRect card = {36, 390 + i * 88, 612, 78};
-        bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action() : app_settings_reader_key_action(s_reader_key_pick)) == i;
+        bool selected = (s_reader_key_pick == 3 ? app_settings_reader_hold_action()
+                       : s_reader_key_pick == 4 ? app_settings_reader_double_action()
+                       : app_settings_reader_key_action(s_reader_key_pick)) == i;
         ui_fill_round_rect(fb, card, 20, selected ? 0xd8 : UI_GRAY_WHITE);
         ui_draw_control_frame(fb, card, 20, 0x58);
         reader_panel_text_vc(fb, 58, card.y + 39, 27, reader_key_label(i), EPD_DRAW_ALIGN_LEFT, false);
@@ -5307,12 +5316,14 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
         return reading_settings_action(ctx, x, y);
     if (s_reader_panel == READER_PANEL_KEY_SETTINGS || s_reader_panel == READER_PANEL_KEY_PICKER) {
         bool picker = s_reader_panel == READER_PANEL_KEY_PICKER;
-        if (y < 270) s_reader_panel = READER_PANEL_NONE;
-        else if (ui_rect_hit((EpdRect){36, 299, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
+        int top = picker ? 270 : KEY_SETTINGS_TOP;
+        if (y < top) s_reader_panel = READER_PANEL_NONE;
+        else if (ui_rect_hit((EpdRect){36, top + 29, 56, 56}, x, y) || ui_rect_hit((EpdRect){36, 1141, 612, 58}, x, y))
             s_reader_panel = picker ? READER_PANEL_KEY_SETTINGS : READER_PANEL_REFRESH_SETTINGS;
         else if (picker) {
             for (int i = 0; i < APP_READER_KEY_COUNT; ++i) if (ui_rect_hit((EpdRect){36, 390 + i * 94, 612, 78}, x, y)) {
                 bool saved = s_reader_key_pick == 3 ? app_settings_set_reader_hold_action(i)
+                    : s_reader_key_pick == 4 ? app_settings_set_reader_double_action(i)
                     : app_settings_set_reader_key_action(s_reader_key_pick, i);
                 if (!saved) {
                     copy_text(s_reader_key_error, sizeof(s_reader_key_error), "保存失败，请重试");
@@ -5329,14 +5340,16 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_reader_panel = READER_PANEL_KEY_PICKER;
                 return APP_REDRAW_PAGE;
             }
-            if (ui_rect_hit((EpdRect){36, 646, 612, 96}, x, y)) {
+            if (ui_rect_hit((EpdRect){36, KEY_HOLD_TOP, 612, 96}, x, y)) {
                 s_reader_key_pick = 3;
                 s_reader_key_error[0] = 0;
                 s_reader_panel = READER_PANEL_KEY_PICKER;
                 return APP_REDRAW_PAGE;
             }
-            for (unsigned i = 1; i <= 2; ++i) if (ui_rect_hit(reader_key_preset_card(i), x, y)) {
-                app_settings_set_reader_key_preset(i);
+            if (ui_rect_hit((EpdRect){36, KEY_DOUBLE_TOP, 612, KEY_DOUBLE_HEIGHT}, x, y)) {
+                s_reader_key_pick = 4;
+                s_reader_key_error[0] = 0;
+                s_reader_panel = READER_PANEL_KEY_PICKER;
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
@@ -6096,6 +6109,7 @@ static void on_enter(app_ctx_t* ctx) {
 
 }
 static void book_on_exit(app_ctx_t* ctx) {
+    middle_pending_clear();
     book_cover_jobs_cancel(s_cover_generation);s_cover_generation=0;
     shelf_category_remember(ctx);
     s_category_menu = false;
@@ -6119,6 +6133,7 @@ static void book_on_exit(app_ctx_t* ctx) {
 // 先停止使用旧卡句柄与字体预渲染，主循环随后切换内置字体。
 // Stop old-card handles and font preparation before the loop switches to the builtin font.
 static void book_on_media_lost(app_ctx_t* ctx) {
+    middle_pending_clear();
     shelf_category_remember(ctx);
     s_category_menu = false;
     lock_draw();
@@ -6312,6 +6327,12 @@ static app_redraw_t title_style_scroll_gesture(app_ctx_t *ctx, const ui_gesture_
 }
 
 static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) {
+    // 正文里的点按或滑动是另一件事，丢掉还没到期的中键单击；取消/按下不算。
+    // A body tap or swipe is a different action, so drop an unexpired middle click; cancel/press do not.
+    if (s_view == READING && (ev->type == UI_GESTURE_TAP || ev->type == UI_GESTURE_LONG_PRESS ||
+        ev->type == UI_GESTURE_SWIPE_L || ev->type == UI_GESTURE_SWIPE_R ||
+        ev->type == UI_GESTURE_SWIPE_U || ev->type == UI_GESTURE_SWIPE_D))
+        middle_pending_clear();
     if (s_view==SHELF && (s_category_menu || ui_rect_hit((EpdRect){24,79,388,74},ev->x0,ev->y0)))
         return shelf_category_gesture(ctx,ev);
     if (s_view == READING && (s_reader_panel == READER_PANEL_BACKGROUND ||
@@ -6507,6 +6528,36 @@ static app_redraw_t reader_key_action(app_ctx_t *ctx, app_reader_key_action_t ac
         default: return APP_REDRAW_NONE;
     }
 }
+// 未绑定双击时单击立即生效；绑定后第一次单击先挂起，第二次落在窗口内才算双击。
+// 上一次已超时的单击在本次按键里补发，本次单击重新挂起，输入不丢。
+// With no double action a single click fires at once; once bound, the first click is held and
+// only a second click inside the window counts as a double. An expired single is replayed on
+// the next press while the new click becomes pending, so no input is lost.
+static app_redraw_t middle_short_press(app_ctx_t *ctx) {
+    app_reader_key_action_t action = app_settings_reader_key_action(1);
+    app_reader_key_action_t double_action = app_settings_reader_double_action();
+    if (double_action == APP_READER_KEY_NONE) return reader_key_action(ctx, action);
+    if (s_middle_pending && ctx->now_ms - s_middle_pending_ms <= READER_MIDDLE_DOUBLE_MS) {
+        s_middle_pending = false;
+        return reader_key_action(ctx, double_action);
+    }
+    app_redraw_t replayed = APP_REDRAW_NONE;
+    if (s_middle_pending) replayed = reader_key_action(ctx, s_middle_pending_action);
+    s_middle_pending = true;
+    s_middle_pending_action = action;
+    s_middle_pending_ms = ctx->now_ms;
+    return replayed;
+}
+// 窗口到期且没有触摸时补发挂起的单击；手指还按着就顺延到抬手之后。
+// Replays the held single once the window expires with no contact; a finger still down
+// postpones it until release.
+static app_redraw_t middle_pending_tick(app_ctx_t *ctx) {
+    if (!s_middle_pending) return APP_REDRAW_NONE;
+    if (s_view != READING || (ctx->touch && ctx->touch->touched) ||
+        ctx->now_ms - s_middle_pending_ms <= READER_MIDDLE_DOUBLE_MS) return APP_REDRAW_NONE;
+    s_middle_pending = false;
+    return reader_key_action(ctx, s_middle_pending_action);
+}
 static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     s_pressed_control = -1;
     if (s_view == TOC && s_toc_jump_open) {
@@ -6530,8 +6581,13 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
         if (s_view == SHELF) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     }
     if (s_scan_pending || s_clear_confirm) return APP_REDRAW_NONE;
-    if (s_view == READING && (key == UI_KEY_1 || key == UI_KEY_2 || key == UI_KEY_3))
-        return reader_key_action(ctx, app_settings_reader_key_action(key == UI_KEY_1 ? 0 : key == UI_KEY_2 ? 1 : 2));
+    if (s_view == READING && (key == UI_KEY_1 || key == UI_KEY_2 || key == UI_KEY_3)) {
+        if (key != UI_KEY_2) {
+            middle_pending_clear();
+            return reader_key_action(ctx, app_settings_reader_key_action(key == UI_KEY_1 ? 0 : 2));
+        }
+        return middle_short_press(ctx);
+    }
     if (key == UI_KEY_2) {
         if (s_view == BULK) s_view = SHELF;
         else if (s_view == SHELF) { ui_nav_request(ctx, 3); return APP_REDRAW_NONE; }
@@ -6565,6 +6621,9 @@ static app_redraw_t on_power_short(app_ctx_t* ctx) {
 }
 static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
     if (key != UI_KEY_2) return APP_REDRAW_NONE;
+    // 长按是新的明确手势，吃掉未到期的单击，避免先翻页再回首页。
+    // A hold is an explicit new gesture: drop the unexpired click instead of compounding actions.
+    middle_pending_clear();
     if (s_view == TOC && s_toc_jump_open) {
         s_toc_jump_open = s_toc_jump_drag = false;
         return APP_REDRAW_PAGE;
@@ -6639,6 +6698,8 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
             ? editor_paint(ctx, false) : APP_REDRAW_NONE;
     }
     if (ctx->consumed) return APP_REDRAW_NONE;
+    app_redraw_t middle = middle_pending_tick(ctx);
+    if (middle != APP_REDRAW_NONE) return middle;
     // 上/左为上一页，下/右为下一页；书架复用滑动的局部刷新，不闪动题头和底栏。
     // Up/left turn back, down/right turn forward; the shelf reuses swipe refresh without flashing chrome.
     if (app_settings_ble_turner()) {
@@ -6729,6 +6790,9 @@ static app_redraw_t on_tick(app_ctx_t* ctx) {
     return clock;
 }
 static void before_lock(app_ctx_t* ctx) {
+    // 锁屏期间不补发按键动作，唤醒后从干净状态开始。
+    // Never replay a key action across lock; resume from a clean state.
+    middle_pending_clear();
     shelf_category_remember(ctx);
     s_category_menu = false;
     track_ticket_stats(ctx);

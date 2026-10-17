@@ -70,6 +70,7 @@
 #define NVS_KEY_HIDE_IMAGES "rd_no_image"
 #define NVS_KEY_HOLD_REFRESH "rd_hold_full"
 #define NVS_KEY_HOLD_ACTION "rd_key_hold"
+#define NVS_KEY_DOUBLE_ACTION "rd_key_dbl"
 #define NVS_KEY_READER_KEYS_V2 "rd_keys_v2"
 #define NVS_KEY_VERTICAL_TURN "rd_vertical"
 #define NVS_KEY_BLE_TURNER "ble_turn"
@@ -128,6 +129,7 @@ static bool s_reader_hide_images;
 static bool s_reader_hold_refresh;
 static const char *s_reader_key_names[] = {"rd_key_l", "rd_key_m", "rd_key_r"};
 static uint8_t s_reader_hold_action = APP_READER_KEY_HOME;
+static uint8_t s_reader_double_action = APP_READER_KEY_NONE;
 static uint8_t s_reader_keys[3] = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT};
 static bool s_reader_vertical_turn;
 static bool s_ble_turner;
@@ -331,6 +333,9 @@ void app_settings_init(void) {
     uint8_t hold_action = APP_READER_KEY_HOME;
     s_reader_hold_action = nvs_get_u8(h, NVS_KEY_HOLD_ACTION, &hold_action) == ESP_OK && hold_action < APP_READER_KEY_COUNT
         ? hold_action : APP_READER_KEY_HOME;
+    uint8_t double_action = APP_READER_KEY_NONE;
+    s_reader_double_action = nvs_get_u8(h, NVS_KEY_DOUBLE_ACTION, &double_action) == ESP_OK && double_action < APP_READER_KEY_COUNT
+        ? double_action : APP_READER_KEY_NONE;
     uint8_t keys_v2 = 0;
     bool migrate_reader_defaults = nvs_get_u8(h, NVS_KEY_READER_KEYS_V2, &keys_v2) != ESP_OK || keys_v2 != 1;
     bool old_default_hold = migrate_reader_defaults && s_reader_hold_action == APP_READER_KEY_REFRESH &&
@@ -759,7 +764,7 @@ app_reader_key_action_t app_settings_reader_key_action(unsigned key) {
     return key < 3 ? (app_reader_key_action_t)s_reader_keys[key] : APP_READER_KEY_NONE;
 }
 bool app_settings_reader_key_action_allowed(unsigned key, app_reader_key_action_t action) {
-    return key < 4 && action >= 0 && action < APP_READER_KEY_COUNT;
+    return key < 5 && action >= 0 && action < APP_READER_KEY_COUNT;
 }
 bool app_settings_set_reader_key_action(unsigned key, app_reader_key_action_t action) {
     if (key >= 3 || !app_settings_reader_key_action_allowed(key, action)) return false;
@@ -782,6 +787,18 @@ bool app_settings_set_reader_hold_action(app_reader_key_action_t action) {
     if (err == ESP_OK) err = nvs_commit(h);
     nvs_close(h);
     if (err == ESP_OK) s_reader_hold_action = action;
+    return err == ESP_OK;
+}
+app_reader_key_action_t app_settings_reader_double_action(void) { return (app_reader_key_action_t)s_reader_double_action; }
+bool app_settings_set_reader_double_action(app_reader_key_action_t action) {
+    if (!app_settings_reader_key_action_allowed(4, action)) return false;
+    if (s_reader_double_action == action) return true;
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_set_u8(h, NVS_KEY_DOUBLE_ACTION, action);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    if (err == ESP_OK) s_reader_double_action = action;
     return err == ESP_OK;
 }
 void app_settings_set_reader_key_preset(unsigned preset) {
@@ -1008,6 +1025,17 @@ static bool backup_title_size_valid(const settings_backup_title_size_t *size) {
            !((size->px - APP_BOOK_TITLE_SIZE_MIN) % APP_BOOK_TITLE_SIZE_STEP) &&
            stored == backup_title_size_checksum(size);
 }
+// v21 追加中键双击动作；旧备份回落「不操作」。
+// V21 appends the middle double-press action; older backups fall back to no action.
+typedef struct { uint8_t action, checksum[4]; } settings_backup_double_t;
+static uint32_t backup_double_checksum(const settings_backup_double_t *dbl) {
+    return (2166136261u ^ dbl->action) * 16777619u;
+}
+static bool backup_double_valid(const settings_backup_double_t *dbl) {
+    uint32_t stored = 0;
+    for (unsigned i = 0; i < 4; ++i) stored |= (uint32_t)dbl->checksum[i] << (8 * i);
+    return dbl->action < APP_READER_KEY_COUNT && stored == backup_double_checksum(dbl);
+}
 typedef struct { char path[288]; uint8_t checksum[4]; } settings_backup_background_t;
 static uint32_t backup_background_checksum(const settings_backup_background_t *background) {
     uint32_t hash = 2166136261u;
@@ -1033,7 +1061,7 @@ static bool backup_home_valid(const settings_backup_home_t *v) {
 static unsigned backup_version(const settings_backup_v1_t *backup) {
     if (memcmp(backup->magic, "PICOSET", 7)) return 0;
     unsigned char c = backup->magic[7];
-    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : 0;
+    return c >= '1' && c <= '9' ? c - '0' : c == 'A' ? 10 : c == 'B' ? 11 : c == 'C' ? 12 : c == 'D' ? 13 : c == 'E' ? 14 : c == 'F' ? 15 : c == 'G' ? 16 : c == 'H' ? 17 : c == 'I' ? 18 : c == 'J' ? 19 : c == 'K' ? 20 : c == 'L' ? 21 : 0;
 }
 
 static void backup_erase_secret(void *ptr, size_t size) {
@@ -1113,7 +1141,7 @@ static bool backup_card_ready(void) {
 esp_err_t app_settings_backup_save(void) {
     if (!backup_card_ready()) return ESP_ERR_INVALID_STATE;
     settings_backup_v1_t backup = {0};
-    memcpy(backup.magic, "PICOSETK", sizeof(backup.magic));
+    memcpy(backup.magic, "PICOSETL", sizeof(backup.magic));
     uint8_t *f = backup.flags;
     f[BK_SLEEP] = s_sleep;
     f[BK_PICKUP] = s_pickup_wake;
@@ -1187,6 +1215,9 @@ esp_err_t app_settings_backup_save(void) {
     settings_backup_title_size_t title_size = {.px = s_book_title_size};
     uint32_t title_size_hash = backup_title_size_checksum(&title_size);
     for (unsigned i = 0; i < 4; ++i) title_size.checksum[i] = (uint8_t)(title_size_hash >> (8 * i));
+    settings_backup_double_t double_action = {.action = s_reader_double_action};
+    uint32_t double_hash = backup_double_checksum(&double_action);
+    for (unsigned i = 0; i < 4; ++i) double_action.checksum[i] = (uint8_t)(double_hash >> (8 * i));
     settings_backup_wifi_t wifi = {0};
     esp_err_t wifi_err = read_pico_transfer_export_wifi_backup(&wifi.credentials);
     if (wifi_err != ESP_OK) { backup_erase_secret(&wifi, sizeof(wifi)); return wifi_err; }
@@ -1214,6 +1245,7 @@ esp_err_t app_settings_backup_save(void) {
     if (ok) ok = fwrite(&open_full, 1, sizeof(open_full), file) == sizeof(open_full);
     if (ok) ok = fwrite(&title_style, 1, sizeof(title_style), file) == sizeof(title_style);
     if (ok) ok = fwrite(&title_size, 1, sizeof(title_size), file) == sizeof(title_size);
+    if (ok) ok = fwrite(&double_action, 1, sizeof(double_action), file) == sizeof(double_action);
     backup_erase_secret(&wifi, sizeof(wifi));
     if (ok) ok = book_history_backup_write(file) == ESP_OK;
     if (ok) ok = fflush(file) == 0;
@@ -1294,6 +1326,7 @@ esp_err_t app_settings_backup_restore(void) {
     settings_backup_open_full_t open_full = {.open_full = 1};
     settings_backup_title_style_t title_style = {.style = APP_BOOK_TITLE_STYLE_DEFAULT};
     settings_backup_title_size_t title_size = {.px = APP_BOOK_TITLE_SIZE_DEFAULT};
+    settings_backup_double_t double_action = {.action = APP_READER_KEY_NONE};
     settings_backup_profile_t profile = {.device_name = "kiikoread"};
     settings_backup_keys_t keys = {.actions = {APP_READER_KEY_PREV, APP_READER_KEY_TOOLS, APP_READER_KEY_NEXT}};
     settings_backup_wifi_t wifi = {0};
@@ -1364,6 +1397,7 @@ esp_err_t app_settings_backup_restore(void) {
     if (ok && version >= 18) ok = fread(&open_full, 1, sizeof(open_full), file) == sizeof(open_full) && backup_open_full_valid(&open_full);
     if (ok && version >= 19) ok = fread(&title_style, 1, sizeof(title_style), file) == sizeof(title_style) && backup_title_style_valid(&title_style);
     if (ok && version >= 20) ok = fread(&title_size, 1, sizeof(title_size), file) == sizeof(title_size) && backup_title_size_valid(&title_size);
+    if (ok && version >= 21) ok = fread(&double_action, 1, sizeof(double_action), file) == sizeof(double_action) && backup_double_valid(&double_action);
     bool has_history = ok && version >= 6;
     if (has_history) {
         history_position = ftell(file);
@@ -1402,6 +1436,7 @@ esp_err_t app_settings_backup_restore(void) {
 #define BACKUP_SET_STR(key, value) do { if (err == ESP_OK) err = nvs_set_str(h, key, value); } while (0)
     for (unsigned i = 0; i < 3 && err == ESP_OK; ++i) err = nvs_set_u8(h, s_reader_key_names[i], keys.actions[i]);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_HOLD_ACTION, hold.action);
+    if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_DOUBLE_ACTION, double_action.action);
     BACKUP_SET_U8(NVS_KEY_SLEEP, BK_SLEEP);
     if (err == ESP_OK) err = nvs_set_u8(h, NVS_KEY_SHUTDOWN_MODE, staged_shutdown & 1);
     uint8_t idle_values[] = {0, 1, 5, 10};
@@ -1467,6 +1502,7 @@ esp_err_t app_settings_backup_restore(void) {
 
     memcpy(s_reader_keys, keys.actions, sizeof(s_reader_keys));
     s_reader_hold_action = hold.action;
+    s_reader_double_action = double_action.action;
     s_book_weight = fine_weight/APP_BOOK_WEIGHT_SUBSTEPS+2;
     s_book_weight_fine = fine_weight;
     s_book_antialias = antialias;

@@ -240,6 +240,11 @@ static bool s_toc_jump_open,s_toc_jump_drag;
 static int s_toc_jump_percent;
 typedef enum {READER_PANEL_NONE,READER_PANEL_TOOLS} reader_panel_t;
 static reader_panel_t s_reader_panel;
+#define READER_MIDDLE_DOUBLE_MS 340
+static bool s_middle_pending;
+static uint8_t s_middle_pending_action;
+static int64_t s_middle_pending_ms;
+static void middle_pending_clear(void) { s_middle_pending = false; }
 static int s_reader_slider=-1;
 static bool s_reader_slider_endpoint;
 static int s_reader_preview_px,s_reader_preview_margin,s_reader_preview_line,s_reader_preview_para,s_reader_preview_tracking;
@@ -399,7 +404,9 @@ input_header='\n'.join(line for line in input_header.splitlines() if not line.st
 unit+=enum+'\n'+input_header+r'''
 static app_reader_key_action_t test_keys[3]={APP_READER_KEY_PREV,APP_READER_KEY_TOOLS,APP_READER_KEY_NEXT};
 static app_reader_key_action_t test_hold_action=APP_READER_KEY_REFRESH;
+static app_reader_key_action_t test_double_action=APP_READER_KEY_NONE;
 static app_reader_key_action_t app_settings_reader_hold_action(void){return test_hold_action;}
+static app_reader_key_action_t app_settings_reader_double_action(void){return test_double_action;}
 static app_reader_key_action_t app_settings_reader_key_action(unsigned key){return test_keys[key];}
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
@@ -423,7 +430,7 @@ static char s_category_root[288];
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
 for name in ("inline_ink_gray", "reader_margin_level", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "favorite_save", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "leaves", "selected_count", "clear_selection", "toggle_selection", "select_page", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "middle_short_press", "middle_pending_tick", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
@@ -830,6 +837,23 @@ int main(void) {
     s_reader_fullscreen=false;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && s_reader_fullscreen);
     assert(on_key(&ctx,UI_KEY_3)==APP_REDRAW_PAGE && s_reader_panel==READER_PANEL_TOOLS);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL && s_reader_panel==READER_PANEL_NONE);
+    // 中键双击：绑定后第一次单击挂起，窗口内第二次触发双击；超时补发单击，长按吃掉挂起。
+    // Middle double press: the first click is held, a second inside the window fires the double,
+    // an expired click is replayed by the tick, and a hold drops the held click.
+    test_keys[1]=APP_READER_KEY_TOOLS;test_double_action=APP_READER_KEY_FULLSCREEN;
+    s_reader_panel=READER_PANEL_NONE;s_reader_fullscreen=false;
+    ctx.now_ms=1000;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE&&!s_reader_fullscreen);
+    ctx.now_ms=1200;assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&s_reader_fullscreen);
+    ctx.now_ms=2000;s_reader_panel=READER_PANEL_NONE;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);
+    ctx.now_ms=2400;assert(middle_pending_tick(&ctx)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_TOOLS);
+    ctx.now_ms=3000;s_reader_panel=READER_PANEL_NONE;
+    assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_NONE);
+    test_hold_action=APP_READER_KEY_HOME;s_reader_return_home=true;test_nav_target=-1;
+    assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_NONE&&test_nav_target==0);
+    assert(middle_pending_tick(&ctx)==APP_REDRAW_NONE&&s_reader_panel==READER_PANEL_NONE);
+    s_reader_return_home=false;
+    test_double_action=APP_READER_KEY_NONE;test_keys[1]=APP_READER_KEY_FULLSCREEN;
     // 单动作语义：HOME 跟随来路标志。这里验证按键映射生效，置位标志再回首页。
     // Single-action semantics: HOME follows the origin flag. Set it so the mapping goes home.
     s_reader_return_home=true;test_nav_target=-1;
