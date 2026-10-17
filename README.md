@@ -12,9 +12,9 @@ An independent reading firmware with publicly available source for the **MindRes
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
 
-## Current release: rc93
+## Current release: rc95
 
-This release prioritizes rapid page turns, processed cover caches and a single ordinary acrylic shelf scan, reduces collage/chapter working memory, prepares avatars in the background and improves RTC calibration. Continue-card return follows the opening origin; bottom-edge Tools no longer requires a key mapping. Settings use discrete swipes in all main modes. USB, TF and OTA share one build; historical releases remain available. See the [changelog](docs/CHANGELOG.md).
+This release adds four chapter heading styles and five heading sizes that repaint the heading without re-typesetting the body, keeps the remembered full-screen preference when a book is reopened from the shelf, and makes a body tap dismiss the reader toolbar without also turning the page. It merges upstream rc94/rc95: periodic cleanup and manual full refresh share one whole-screen GC16, unchanged differentials release the pixel driver, and automatic time sync runs every six hours. USB, TF and OTA share one build; historical releases remain available. See the [changelog](docs/CHANGELOG.md).
 
 ### Settings, storage and lock fixes
 

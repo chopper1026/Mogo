@@ -3,8 +3,12 @@
 按版本简述对用户可见的变化；使用方法见 [README](../README.zh-CN.md)。
 User-visible changes by release; see [README](../README.md) for usage.
 
-## 未发布 / Unreleased
+## 0.3.3-rc95 / 2026-10-17
 
+- 阅读工具栏展开时，点按正文只收起工具栏，不再顺带翻页；再次点按才翻页，左右/上下滑动、三键、电源键与晃动翻页保持不变。工具栏按钮、页眉、左右边距与通栏插图侧边条同样只收起。
+  With the reader toolbar open, a body tap now only dismisses it instead of also turning the page; the next tap turns, while horizontal/vertical swipes, keys, the power key and shake turns keep working. Toolbar buttons, the header, side margins and full-bleed image strips behave the same way.
+- 修复从书架重新开书时全屏偏好未生效的问题：工具栏切换全屏后，新开书沿用刚记住的偏好（默认全屏）。
+  Fix the full-screen preference not applying when a book is reopened from the shelf: a new book now follows the preference just remembered from the toolbar toggle (default full screen).
 - 「标题样式」新增字号档：章名字号 36/42/48/54/60 px 五档，编号恒为它的一半，默认 48 px 与升级前的题头一样大；「字体设置 → 排版设置 → 标题样式」面板顶部新增一行「标题字号」（− / 当前值 · 复位 / +），改档立刻生效。题头带同时由 214 px 加到 294 px，多出的 80 px 从正文里拿——只在每一章的第一页让出约一行，其余页面与正文排版不变。题头块在带内垂直居中（升级后整体下移 55 px），字号放大是绕带心等比放大。换字号只重画当前页题头，不重排、不跳页；样式面板里的四张预览固定画 48 px 基准档，便于四种画法一一对比。竖排与没有章节题头的书不受影响；设置备份随之为 v20，旧备份仍能恢复并把字号回到 48 px。
   The heading style gains five size levels: a 36/42/48/54/60 px chapter title with the label always half of it, defaulting to the 48 px the heading had before. A new Heading size row (- / value · reset / +) sits at the top of Font settings → Layout → Heading style and applies at once. The heading band grows from 214 to 294 px, and the body yields those 80 px only on each chapter's first page, about one line; every other page and the body layout are unchanged. The heading block is centred in the band (55 px lower after upgrading) and a larger size scales around that centre. Changing the size repaints the current page's heading without re-typesetting or jumping pages, the picker's four previews stay at the 48 px reference level so the styles remain directly comparable, and vertical text or books without a chapter heading are untouched. Settings backups move to v20: older backups still restore and return the size to 48 px.
 - 阅读页新增「标题样式」：工具栏「字体设置 → 排版设置 → 标题样式」可选四款横排章节题头——中央章徽、边框索引、左锋题签、静页余白；选择面板里每款都用真实题头画 1:1 预览，点卡片即生效。默认「静页余白」与升级前的画面逐像素一致；样式只改章节首页题头的画法，换样式不重排、不跳页，竖排与没有章节题头的书不受影响。

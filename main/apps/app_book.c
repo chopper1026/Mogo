@@ -97,6 +97,8 @@
  * User approval: choose books subfolders in the title menu, retain per-category/layout pages, remove the header rule and lower the approved body by 8px.
  * 用户修订：页眉去掉返回钮与收藏图标，书名左置；右侧改画状态栏同款时间与电池；三键新增「返回」动作（按来路回退），收藏开关移到书架详情页。
  * User revision: drop the header back/favorite controls and left-align the title; the right side draws the status-bar clock and battery; key actions gain "back" (undoing the entry path) and the favorite toggle moves to the shelf details panel.
+ * 用户修订：工具栏展开时点按正文只收起工具栏，不再顺带翻页；滑动、按键与电源键仍翻页。
+ * User revision: a body tap with the tools bar open only dismisses it; swipes, keys and the power key still turn pages.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -5927,8 +5929,10 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         return APP_REDRAW_NONE;
     }
     if (s_view == READING) {
-        if (s_toolbar && !(s_reader_panel == READER_PANEL_TOOLS && y < 1096 && ui_rect_hit(body_rect(), x, y)))
-            return reader_panel_action(ctx, x, y);
+        // 工具栏展开时点按正文只收起工具栏，不再顺带翻页；其他面板仍按各自规则处理。
+        // A body tap with the tools bar open only dismisses it instead of also turning; the
+        // other panels keep their own rules.
+        if (s_toolbar) return reader_panel_action(ctx, x, y);
         // 页眉只显示书名、时间与电池，无控件；点页眉不翻页，落入下方正文热区判定。
         // The header shows only the title, clock and battery with no controls; header taps do
         // not turn pages and fall through to the body hit test below.
