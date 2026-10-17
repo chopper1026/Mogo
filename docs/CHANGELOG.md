@@ -5,6 +5,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 0.3.3-rc95 / 2026-10-17
 
+- rc95 本地测试（2026-10-17）：标题字号上限由 60 px 提高到 78 px，章名字号现为 36/42/48/54/60/66/72/78 共 8 档（编号仍为一半）。题头带仍是 294 px，78 px 档的细线距带底 13 px；改字号仍只重画当前页，不重排、不跳页。84 px 已贴到带底（只剩 2 px），不再继续上调。
+  rc95 local test (2026-10-17): the heading size cap rises from 60 to 78 px, giving eight levels (36/42/48/54/60/66/72/78) with the label still half. The band stays 294 px and the 78 px level keeps 13 px below its closing rule; changing the level still repaints only the current page without re-typesetting or jumping. 84 px leaves only 2 px and is not offered.
+
 - rc95 本地测试（2026-10-17）：阅读「排版设置」的边距改为 0～60 像素的真实留白，2 像素一档共 31 档，左右留白严格相等；点按滑轨左右两端可逐档微调。完整正文行把行尾余量摊到字间，不再把栏宽吸附到整字格。旧保存值直接沿用，数值含义变为实际像素（默认 48 px 字号下原「24」由 30 px 变为 24 px）。
   rc95 local test (2026-10-17): the Typography margin is now a real 0–60 px inset in 2 px steps (31 stops) with exactly equal side margins, and the small/large ends step one stop per tap. Complete body lines spread their spare width between glyphs instead of snapping the column to whole glyph cells. Saved margins carry over, now meaning actual pixels (the old “24” renders as 24 px instead of 30 px at the default 48 px font).
 

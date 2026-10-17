@@ -155,11 +155,13 @@ void app_settings_set_book_fonts(bool on);
 /// body layout and illustration pagination are affected.
 bool app_settings_book_vertical(void);
 void app_settings_set_book_vertical(bool on);
-/// 章节题头字号：章名字号 px 五档，编号恒为它的一半，带内几何按它缩放；默认档等于历史尺寸。
-/// Chapter heading size: five levels of chapter-title px with the label always half of it, scaling
-/// the geometry inside the heading band; the default level is the historical size.
+/// 章节题头字号：章名字号 px 八档，编号恒为它的一半，带内几何按它缩放；默认档等于历史尺寸。
+/// 上限受 294 px 题头带约束：84 px 时细线离带底只剩 2 px，78 px 保留 13 px，取 78 为产品上限。
+/// Chapter heading size: eight levels of chapter-title px with the label always half of it, scaling
+/// the geometry inside the heading band; the default level is the historical size. The 294 px band
+/// caps this at 84 px with only 2 px left below the closing rule, so 78 px keeps 13 px and is the cap.
 #define APP_BOOK_TITLE_SIZE_MIN 36      ///< 最小章名 px / Smallest chapter-title px
-#define APP_BOOK_TITLE_SIZE_MAX 60      ///< 最大章名 px / Largest chapter-title px
+#define APP_BOOK_TITLE_SIZE_MAX 78      ///< 最大章名 px / Largest chapter-title px
 #define APP_BOOK_TITLE_SIZE_STEP 6      ///< 档位步长 / Step between levels
 #define APP_BOOK_TITLE_SIZE_DEFAULT 48  ///< 历史尺寸，升级不变画面 / Historical size
 /// 阅读页章节题头字号（章名 px）；越界值夹到最近一档，0 视为未设置并回到基准档。
